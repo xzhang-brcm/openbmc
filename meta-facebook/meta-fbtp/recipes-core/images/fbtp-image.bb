@@ -33,7 +33,7 @@ IMAGE_INSTALL += " \
   ipmbd \
   me-util \
   ipmb-util \
-  log-util \
+  log-util-v2 \
   kcsd \
   healthd \
   fpc-util \
@@ -56,4 +56,5 @@ IMAGE_INSTALL += " \
   obmc-sensors-test \
   dimm-util \
   setup-gpio \
+  name-util \
   "

@@ -845,11 +845,14 @@ int plat_get_me_status(uint8_t fru, char *status)
 int plat_get_board_id(char *id)
 {
   int board_id;
-  
-  if (fby2_common_get_gpio_val(GPIO_BOARD_ID, &board_id) != 0) {
+
+  board_id = fby2_common_get_board_id();
+  if (board_id < 0) {
+    syslog(LOG_WARNING, "plat_get_board_id: fail to get spb board id");
     return -1;
   }
   sprintf(id, "%02d", board_id);
+
   return 0;
 }
 
@@ -903,6 +906,33 @@ int plat_get_etra_fw_version(uint8_t slot_id, char *text)
     } else {
       sprintf(entry,"PCIE_SW_FW_ver:\n0x%02x%02x%02x%02x\n", ver[0], ver[1], ver[2], ver[3]);
       strcat(text, entry);
+    }
+
+    //PCIE switch Bootloader Version
+    if (bic_get_fw_ver(slot_id, FW_PCIE_SWITCH_BL, ver)){
+      strncat(text,"PCIE_SW_BL_ver:\nNA\n", MAX_VALUE_LEN);
+    } else {
+      snprintf(entry, sizeof(entry), "PCIE_SW_BL_ver: 0x%02x%02x (%s, %s)\n", 
+              ver[2], ver[3], (ver[0]? "Active": "Inactive"), (ver[1]? "Valid": "Invalid"));
+      strncat(text, entry, MAX_VALUE_LEN);
+    }
+
+    //PCIE switch Partition0 Version
+    if (bic_get_fw_ver(slot_id, FW_PCIE_SWITCH_PARTMAP0, ver)){
+      strncat(text,"FW_PCIE_SWITCH_PARTMAP0:\nNA\n", MAX_VALUE_LEN);
+    } else {
+      snprintf(entry, sizeof(entry), "FW_PCIE_SWITCH_PARTMAP0: 0x%02x%02x (%s, %s)\n", 
+              ver[2], ver[3], (ver[0]? "Active": "Inactive"), (ver[1]? "Valid": "Invalid"));
+      strncat(text, entry, MAX_VALUE_LEN);
+    }
+
+    //PCIE switch Partition1 Version
+    if (bic_get_fw_ver(slot_id, FW_PCIE_SWITCH_PARTMAP1, ver)){
+      strncat(text,"FW_PCIE_SWITCH_PARTMAP1:\nNA\n", MAX_VALUE_LEN);
+    } else {
+      snprintf(entry, sizeof(entry), "FW_PCIE_SWITCH_PARTMAP1: 0x%02x%02x (%s, %s)\n", 
+              ver[2], ver[3], (ver[0]? "Active": "Inactive"), (ver[1]? "Valid": "Invalid"));
+      strncat(text, entry, MAX_VALUE_LEN);
     }
   }
 
@@ -1025,23 +1055,24 @@ int plat_get_syscfg_text(uint8_t slot, char *text)
 
 int plat_get_extra_sysinfo(uint8_t slot, char *info)
 {
+  char tmp_info[20] = {0};
   char tstr[16];
   uint8_t i, st_12v = 0;
   int ret;
 
   if (!pal_get_fru_name((slot == FRU_ALL)?HAND_SW_BMC:slot, tstr)) {
-    sprintf(info, "FRU:%s", tstr);
+    sprintf(tmp_info, "FRU:%s", tstr);
     if ((slot != FRU_ALL) && pal_is_hsvc_ongoing(slot)) {
       for (i = strlen(info); i < 16; i++) {
-        info[i] = ' ';
+        tmp_info[i] = ' ';
       }
-      info[16] = '\0';
+      tmp_info[16] = '\0';
 
       ret = pal_is_server_12v_on(slot, &st_12v);
       if (!ret && !st_12v)
-        sprintf(info, "%s"ESC_ALT"HSVC: READY"ESC_RST, info);
+        sprintf(info, "%s"ESC_ALT"HSVC: READY"ESC_RST, tmp_info);
       else
-        sprintf(info, "%s"ESC_ALT"HSVC: START"ESC_RST, info);
+        sprintf(info, "%s"ESC_ALT"HSVC: START"ESC_RST, tmp_info);
     }
   }
 

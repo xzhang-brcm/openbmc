@@ -71,15 +71,29 @@ void initialize_jtag_chains(JTAG_Handler* state)
     }
 }
 
+static STATUS JTAG_set_mux(scanChain chain)
+{
+    gpio_value_t value = (chain == SCAN_CHAIN_0) ? GPIO_VALUE_LOW : GPIO_VALUE_HIGH;
+
+    if (gpio_set_value_by_shadow("FM_JTAG_TCK_MUX_SEL", value)) {
+        syslog(LOG_ERR, "Failed to set FM_JTAG_TCK_MUX_SEL as %d", value);
+        return ST_ERR;
+    }
+
+    return ST_OK;
+}
+
 JTAG_Handler* SoftwareJTAGHandler(uint8_t fru)
 {
+    scanChain chain;
     JTAG_Handler* state = (JTAG_Handler*)malloc(sizeof(JTAG_Handler));
     if (state == NULL)
     {
         return NULL;
     }
 
-    state->active_chain = &state->chains[SCAN_CHAIN_0];
+    chain = (fru & 0x80) ? SCAN_CHAIN_1 : SCAN_CHAIN_0;
+    state->active_chain = &state->chains[chain];
     initialize_jtag_chains(state);
     state->sw_mode = true;
     memset(state->padDataOne, ~0, sizeof(state->padDataOne));
@@ -90,6 +104,10 @@ JTAG_Handler* SoftwareJTAGHandler(uint8_t fru)
     {
         state->bitbang_data[i].tms = 0;
         state->bitbang_data[i].tdi = 0;
+    }
+
+    if (JTAG_set_mux(chain) != ST_OK) {
+      syslog(LOG_ERR, "Setting TCK_MUX failed\n");
     }
 
     return state;
@@ -123,47 +141,36 @@ static STATUS JTAG_set_target(int target)
       "JTAG_MUX_SEL_1"
     };
     const unsigned int sel_values[2] = {
-      2, // CPU: JTAG_MUX_SEL_1 = High,  JTAG_MUX_SEL_0 = LOW
-      0, // CPU: JTAG_MUX_SEL_1 = Low,  JTAG_MUX_SEL_0 = LOW
+      2, // CPU:  JTAG_MUX_SEL_1 = High,  JTAG_MUX_SEL_0 = Low
+      3, // CPLD: JTAG_MUX_SEL_1 = High,  JTAG_MUX_SEL_0 = High
     };
     unsigned int mux_sel_value = sel_values[target];
 
-    /* Change GPIOY2 to have the JTAG master communicating
-     * to the CPU instead of CPLD */
-    if (NULL == (gpio = gpio_open_by_shadow("JTAG_MUX_EN_N"))) {
-      syslog(LOG_ERR, "Failed to open JTAG_MUX_EN_N\n");
+    /* To have the JTAG master communicating to the CPU or CPLD */
+    if (NULL == (gpio = gpio_open_by_shadow("FM_MODULAR_ASD_EN"))) {
+      syslog(LOG_ERR, "Failed to open FM_MODULAR_ASD_EN\n");
       return ST_ERR;
     }
 
-    if (gpio_set_direction(gpio, GPIO_DIRECTION_OUT)) {
-      syslog(LOG_ERR, "Failed to set GPIOY2 as an output\n");
-      goto bail;
-    }
-
-    if (target == JTAG_TARGET_CPU) {
-#if 0
-      // Check if this is still needed on Angelslanding.
-      // Set internal strap.
-      if (system("devmem 0x1E6E207C w 0x80000") != 0) {
-        syslog(LOG_ERR, "Failed to set Strap\n");
-        goto bail;
-      }
-#endif
-      expected_value = GPIO_VALUE_LOW;
-    } else {
-      expected_value = GPIO_VALUE_HIGH;
-    }
-
-    gpio_set_value(gpio, expected_value);
+    expected_value = GPIO_VALUE_HIGH;
     gpio_get_value(gpio, &value);
     if (value != expected_value) {
-      syslog(LOG_WARNING, "Writing %d to GPIOY2 failed! ATSD is most probably disabled\n", expected_value);
-      goto bail;
+      if (gpio_set_direction(gpio, GPIO_DIRECTION_OUT)) {
+        syslog(LOG_ERR, "Failed to set FM_MODULAR_ASD_EN as an output\n");
+        goto bail;
+      }
+
+      gpio_set_value(gpio, expected_value);
+      gpio_get_value(gpio, &value);
+      if (value != expected_value) {
+        syslog(LOG_WARNING, "Writing %d to FM_MODULAR_ASD_EN failed! ASD is most probably disabled\n",
+               expected_value);
+        gpio_set_direction(gpio, GPIO_DIRECTION_IN);
+        goto bail;
+      }
     }
 
     if (gpio_set_value_by_shadow_list(mux_sel_gpios, 2, mux_sel_value)) {
-      //reset en gpio value.
-      gpio_set_value(gpio, expected_value == GPIO_VALUE_HIGH ? GPIO_VALUE_LOW : GPIO_VALUE_HIGH);
       goto bail;
     }
     ret = ST_OK;
@@ -171,39 +178,6 @@ bail:
     gpio_close(gpio);
     return ret;
 }
-
-static STATUS JTAG_set_mux(void)
-{
-    gpio_value_t expected_value = GPIO_VALUE_LOW;
-    gpio_value_t value = GPIO_VALUE_INVALID;
-    gpio_desc_t *gpio;
-    STATUS ret = ST_ERR;
-
-    if (NULL == (gpio = gpio_open_by_shadow("FM_JTAG_TCK_MUX_SEL"))) {
-      syslog(LOG_ERR, "Failed to open FM_JTAG_TCK_MUX_SEL\n");
-      return ST_ERR;
-    }
-
-    if (gpio_set_direction(gpio, GPIO_DIRECTION_OUT)) {
-      syslog(LOG_ERR, "Failed to set FM_JTAG_TCK_MUX_SEL as an output\n");
-      goto bail;
-    }
-
-    // TODO Does this need to be switched?
-    gpio_set_value(gpio, expected_value);
-    gpio_get_value(gpio, &value);
-    if (value != expected_value) {
-      syslog(LOG_WARNING, "Writing %d to FM_JTAG_TCK_MUX_SEL failed! ASD is most probably disabled\n", expected_value);
-      goto bail;
-    }
-    ret = ST_OK;
-bail:
-    gpio_close(gpio);
-    return ret;
-
-}
-
-
 
 STATUS JTAG_initialize(JTAG_Handler* state, bool sw_mode)
 {
@@ -220,11 +194,7 @@ STATUS JTAG_initialize(JTAG_Handler* state, bool sw_mode)
       syslog(LOG_ERR, "Setting JTAG to CPU failed!\n");
       return ST_ERR;
     }
-    if (JTAG_set_mux() != ST_OK) {
-      syslog(LOG_ERR, "Setting TCK_MUX failed\n");
-      JTAG_set_target(JTAG_TARGET_CPLD);
-      return ST_ERR;
-    }
+
 //    ASD_log(ASD_LogLevel_Info, stream, option, "JTAG mode set to '%s'.",
 //            state->sw_mode ? "software" : "hardware");
 
@@ -350,7 +320,6 @@ STATUS JTAG_set_tap_state(JTAG_Handler* state, JtagStates tap_state)
     params.to_state = tap_state;
 #else
     struct jtag_tap_state tap_state_t;
-    tap_state_t.from = state->active_chain->tap_state;
     tap_state_t.endstate = tap_state;
     tap_state_t.reset =
         (tap_state == JtagTLR) ? JTAG_FORCE_RESET : JTAG_NO_RESET;
@@ -501,7 +470,6 @@ STATUS perform_shift(JTAG_Handler* state, unsigned int number_of_bits,
 
     unsigned char tdio[MAX_DATA_SIZE];
 
-    xfer.from = current_tap_state;
     xfer.endstate = end_tap_state;
     xfer.type =
         (current_tap_state == JtagShfIR) ? JTAG_SIR_XFER : JTAG_SDR_XFER;
@@ -574,8 +542,6 @@ STATUS JTAG_wait_cycles(JTAG_Handler* state, unsigned int number_of_cycles)
         }
     }
 #else
-    struct bitbang_packet bitbang = {NULL, 0};
-
     if (state == NULL)
         return ST_ERR;
 
@@ -584,14 +550,14 @@ STATUS JTAG_wait_cycles(JTAG_Handler* state, unsigned int number_of_cycles)
 
     if (state->sw_mode)
     {
-        bitbang.data = state->bitbang_data;
-        bitbang.length = number_of_cycles;
-
-        if (ioctl(state->JTAG_driver_handle, JTAG_IOCBITBANG, &bitbang) < 0)
+        for (unsigned int i = 0; i < number_of_cycles; i++)
         {
-//            ASD_log(ASD_LogLevel_Error, stream, option,
-//                    "ioctl JTAG_IOCBITBANG failed");
-            return ST_ERR;
+            if (ioctl(state->JTAG_driver_handle, JTAG_IOCBITBANG, &state->bitbang_data[i]) < 0)
+            {
+//                ASD_log(ASD_LogLevel_Error, stream, option,
+//                        "ioctl JTAG_IOCBITBANG failed");
+                return ST_ERR;
+            }
         }
     }
 #endif

@@ -29,6 +29,7 @@ import (
 	"github.com/facebook/openbmc/tools/flashy/lib/utils"
 )
 
+// FlashCp is a step function that runs the flashcp procedure.
 func FlashCp(stepParams step.StepParams) step.StepExitError {
 	log.Printf("Flashing using flashcp method")
 	log.Printf("Attempting to flash '%v' with image file '%v'",
@@ -41,12 +42,10 @@ func FlashCp(stepParams step.StepParams) step.StepExitError {
 		return step.ExitSafeToReboot{err}
 	}
 	log.Printf("Flash device: %v", flashDevice)
-	err = flashCpAndValidate(flashDevice, stepParams.ImageFilePath)
+	err = flashCpAndValidate(flashDevice, stepParams.ImageFilePath, 0)
 	if err != nil {
-		// return safe to reboot here to retry.
-		// error handler (step.HandleStepError) will check if
-		// either flash device is valid.
-		return step.ExitSafeToReboot{err}
+		// failed validation considered to be a deal breaker
+		return step.ExitUnsafeToReboot{err}
 	}
 
 	// make sure no other flasher is running
@@ -60,9 +59,17 @@ func FlashCp(stepParams step.StepParams) step.StepExitError {
 	return nil
 }
 
-var flashCpAndValidate = func(flashDevice devices.FlashDevice, imageFilePath string) error {
+// flashCpAndValidate calls Flashy's internal implementation of FlashCp.
+// roOffset is the starting RO offset for FlashCp. It's used for vboot
+// flash devices with RO offsets. (In `dd` terms, roOffset is both seek=
+// and skip=).
+var flashCpAndValidate = func(
+	flashDevice devices.FlashDevice,
+	imageFilePath string,
+	roOffset uint32,
+) error {
 	log.Printf("Starting to flash")
-	err := flashcp.FlashCp(imageFilePath, flashDevice.GetFilePath())
+	err := flashcp.FlashCp(imageFilePath, flashDevice.GetFilePath(), roOffset)
 	if err != nil {
 		log.Printf("FlashCp failed: %v", err)
 		return err

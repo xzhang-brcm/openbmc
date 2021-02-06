@@ -20,9 +20,6 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#include "platform/sdr.h"
-#include "platform/sel.h"
-#include "platform/fruid.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -35,6 +32,13 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/reboot.h>
+
+#include <openbmc/log.h>
+
+#include "platform/sdr.h"
+#include "platform/sel.h"
+#include "platform/fruid.h"
+#include "platform/sensor.h"
 
 #define SOCK_PATH "/tmp/ipmi_socket"
 
@@ -377,7 +381,7 @@ chassis_get_boot_options (unsigned char *request, unsigned char *response,
       *data++ = 0x00;
       *data++ = 0x00;
       break;
-    deault:
+    default:
       res->cc = CC_PARAM_OUT_OF_RANGE;
       break;
   }
@@ -1421,7 +1425,9 @@ ipmi_handle (unsigned char *request, unsigned char req_len,
       res->netfn_lun = NETFN_OEM_RES << 2;
       ipmi_handle_oem (request, req_len, response, res_len);
       break;
+
     default:
+      IPMID_VERBOSE("unsupported Network Function 0x%02x\n", netfn);
       res->netfn_lun = (netfn + 1) << 2;
       break;
   }
@@ -1481,7 +1487,7 @@ dump_usage(const char *prog_name)
 int
 main (int argc, char **argv)
 {
-  int s, s2, t, len;
+  int s, s2, len;
   struct sockaddr_un local, remote;
   pthread_t tid;
 
@@ -1512,8 +1518,10 @@ main (int argc, char **argv)
     }
   } /* while */
 
+  obmc_log_init("ipmid", LOG_INFO, 0);
+  obmc_log_set_syslog(LOG_CONS, LOG_DAEMON);
+  obmc_log_unset_std_stream();
   daemon(1, 0);
-  openlog("ipmid", LOG_CONS, LOG_DAEMON);
 
   plat_sel_init();
   plat_sensor_init();
@@ -1550,9 +1558,9 @@ main (int argc, char **argv)
 
   IPMID_VERBOSE("starting ipmid main loop\n");
   while(1) {
-    int n;
-    t = sizeof (remote);
-    if ((s2 = accept (s, (struct sockaddr *) &remote, &t)) < 0) {
+    socklen_t slen = sizeof(remote);
+
+    if ((s2 = accept(s, (struct sockaddr *)&remote, &slen)) < 0) {
       syslog(LOG_ALERT, "ipmid: accept() failed\n");
       break;
     }

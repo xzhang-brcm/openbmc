@@ -18,34 +18,65 @@
 # Boston, MA 02110-1301 USA
 #
 
-from rest_fruid import get_fruid
-from rest_helper import read_gpio_sysfs
+import functools
+import re
+import typing as t
+
+import rest_fruid
+from rest_helper import read_gpio_by_shadow
 
 
-WEDGES = ["Wedge-AC-F", "Wedge-DC-F"]
+WEDGE40 = ["Wedge-DC-F", "Wedge-AC-F"]
 
 
-def read_wedge_back_ports():
-    bhinfo = {
-        "port_1": {
-            "pin_1": read_gpio_sysfs(120),
-            "pin_2": read_gpio_sysfs(121),
-            "pin_3": read_gpio_sysfs(122),
-            "pin_4": read_gpio_sysfs(123),
-        },
-        "port_2": {
-            "pin_1": read_gpio_sysfs(124),
-            "pin_2": read_gpio_sysfs(125),
-            "pin_3": read_gpio_sysfs(126),
-            "pin_4": read_gpio_sysfs(52),
-        },
-    }
+def read_wedge_back_ports(legacy=False):
+    if legacy:
+        bhinfo = {
+            "port_1": {
+                "pin_1": read_gpio_by_shadow("BLOODHOUND_GPIOP0"),
+                "pin_2": read_gpio_by_shadow("BLOODHOUND_GPIOP1"),
+                "pin_3": read_gpio_by_shadow("BLOODHOUND_GPIOP2"),
+                "pin_4": read_gpio_by_shadow("BLOODHOUND_GPIOP3"),
+            },
+            "port_2": {
+                "pin_1": read_gpio_by_shadow("BLOODHOUND_GPIOP4"),
+                "pin_2": read_gpio_by_shadow("BLOODHOUND_GPIOP5"),
+            },
+        }
+    else:
+        bhinfo = {
+            "port_1": {
+                "pin_1": read_gpio_by_shadow("RMON1_PF"),
+                "pin_2": read_gpio_by_shadow("RMON1_RF"),
+                "pin_3": read_gpio_by_shadow("RMON2_PF"),
+                "pin_4": read_gpio_by_shadow("RMON2_RF"),
+            },
+            "port_2": {
+                "pin_1": read_gpio_by_shadow("RMON3_PF"),
+                "pin_2": read_gpio_by_shadow("RMON3_RF"),
+            },
+        }
     return bhinfo
 
 
+@functools.lru_cache(maxsize=1)
+def _check_wedge() -> t.Tuple[bool, bool]:
+    """
+    Returns if a given BMC unit is a wedge RSW and whether it's a wedge40
+    -> (is_wedge, is_wedge40)
+    """
+
+    # Check if this is a wedge40 from fruinfo
+    fruinfo = rest_fruid.get_fruid()
+    if re.match("WEDGE.*", fruinfo["Information"]["Product Name"], re.IGNORECASE):
+        return True, fruinfo["Information"]["Product Name"] in WEDGE40
+
+    # Not a wedge
+    return False, False
+
+
 def get_gpios():
-    fruinfo = get_fruid()
-    gpioinfo = {}
-    if fruinfo["Information"]["Product Name"] in WEDGES:
-        gpioinfo["back_ports"] = read_wedge_back_ports()
-    return gpioinfo
+    is_wedge, is_wedge40 = _check_wedge()
+    if is_wedge:
+        return {"back_ports": read_wedge_back_ports(is_wedge40)}
+    return {}

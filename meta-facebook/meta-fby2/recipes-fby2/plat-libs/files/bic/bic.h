@@ -35,7 +35,9 @@ extern "C" {
 #define DEV_SENSOR_INFO_LEN  6
 
 #define CC_BIC_RETRY 0x70
+#define CC_BIC_INVALID_CMD 0xC1
 #define BIC_RETRY_ACTION  -2
+#define BIC_INVALID_CMD  -3
 
 // Device fw update
 #define CFM1_START 0x00002000
@@ -340,10 +342,13 @@ enum {
 
 // GPv2
 enum {
-  FW_3V3_VR = 5,
-  FW_0V92 = 6,
-  FW_PCIE_SWITCH_CFG = 7,
-  FW_PCIE_SWITCH_FW = 8,
+  FW_3V3_VR = 0x5,
+  FW_0V92 = 0x6,
+  FW_PCIE_SWITCH_CFG = 0x7,
+  FW_PCIE_SWITCH_FW = 0x8,
+  FW_PCIE_SWITCH_BL = 0x9,
+  FW_PCIE_SWITCH_PARTMAP0 = 0xA,
+  FW_PCIE_SWITCH_PARTMAP1 = 0xB,
 };
 
 // ND
@@ -411,6 +416,12 @@ enum {
   GET_BOOT_LOCATION = 0x03,
 };
 
+//BIC Sensor monitor control
+enum {
+  BIC_SENSOR_MONITOR_ENABLE = 0,
+  BIC_SENSOR_MONITOR_DISABLE = 1,
+};
+
 /* Generic GPIO configuration */
 typedef struct _bic_gpio_t {
   uint64_t gpio;
@@ -460,6 +471,7 @@ int bic_is_slot_power_en(uint8_t slot_id);
 
 int bic_ipmb_wrapper(uint8_t slot_id, uint8_t netfn, uint8_t cmd, uint8_t *txbuf, uint16_t txlen, uint8_t *rxbuf, uint8_t *rxlen);
 int bic_ipmb_limit_rlen_wrapper(uint8_t slot_id, uint8_t netfn, uint8_t cmd, uint8_t *txbuf, uint16_t txlen, uint8_t *rxbuf, uint8_t *rxlen, uint8_t max_rlen);
+int bic_ipmb_wrapper_with_dev_mux_selection(uint8_t slot_id, int dev_id, uint8_t netfn, uint8_t cmd, uint8_t *txbuf, uint16_t txlen, uint8_t *rxbuf, uint8_t *rxlen);
 int bic_get_dev_id(uint8_t slot_id, ipmi_dev_id_t *id);
 
 int bic_get_bic_config(uint8_t slot_id, bic_config_t *cfg);

@@ -44,14 +44,24 @@
 #define P12V_AUX_DIR \
   P12V_AUX_HWMON_DIR"/hwmon%d/%s"
 
-#define ADM1278_REBOOT	"power_cycle"
+#define ADM1278_REBOOT  "power_cycle"
+
+#define P12V_1_HWMON_DIR \
+  "/sys/bus/i2c/drivers/ltc4282/16-0053/hwmon"
+#define P12V_1_DIR \
+  P12V_1_HWMON_DIR"/hwmon%d/%s"
+
+#define P12V_2_HWMON_DIR \
+  "/sys/bus/i2c/drivers/ltc4282/17-0040/hwmon"
+#define P12V_2_DIR \
+  P12V_2_HWMON_DIR"/hwmon%d/%s"
 
 #define LTC4282_AUX_HWMON_DIR \
   "/sys/bus/i2c/drivers/ltc4282/18-0043/hwmon"
 #define LTC4282_AUX_DIR \
   LTC4282_AUX_HWMON_DIR"/hwmon%d/%s"
 
-#define LTC4282_REBOOT	"reboot"
+#define LTC4282_REBOOT  "reboot"
 
 #define DELAY_POWER_CYCLE 10
 #define MAX_RETRY 10
@@ -65,13 +75,15 @@
 
 #define LAST_KEY "last_key"
 
-const char pal_fru_list[] = "all, mb, pdb, bsm";
+const char pal_fru_list[] =
+"all, mb, pdb, bsm, asic0, asic1, asic2, asic3, asic4, asic5, asic6, asic7";
+
 const char pal_server_list[] = "mb";
 
 char g_dev_guid[GUID_SIZE] = {0};
 
 static int get_board_rev_id(uint8_t*);
-static int key_set_asic_mfr(int, void*);
+static int key_set_server_type(int, void*);
 
 enum key_event {
   KEY_BEFORE_SET,
@@ -87,14 +99,55 @@ struct pal_key_cfg {
   {"identify_sled", "off", NULL},
   {"timestamp_sled", "0", NULL},
   {KEY_MB_SNR_HEALTH, "1", NULL},
-  {KEY_PDB_SNR_HEALTH, "1", NULL},
   {KEY_MB_SEL_ERROR, "1", NULL},
-  {"server_type", "4", NULL},
-  {"asic_mfr", MFR_AMD, key_set_asic_mfr},
+  {KEY_PDB_SNR_HEALTH, "1", NULL},
+  {KEY_ASIC0_SNR_HEALTH, "1", NULL},
+  {KEY_ASIC1_SNR_HEALTH, "1", NULL},
+  {KEY_ASIC2_SNR_HEALTH, "1", NULL},
+  {KEY_ASIC3_SNR_HEALTH, "1", NULL},
+  {KEY_ASIC4_SNR_HEALTH, "1", NULL},
+  {KEY_ASIC5_SNR_HEALTH, "1", NULL},
+  {KEY_ASIC6_SNR_HEALTH, "1", NULL},
+  {KEY_ASIC7_SNR_HEALTH, "1", NULL},
+  {"server_type", "4", key_set_server_type},
+  {"asic_mfr", MFR_NVIDIA, NULL},
   {"ntp_server", "", NULL},
   /* Add more Keys here */
   {LAST_KEY, LAST_KEY, NULL} /* This is the last key of the list */
 };
+
+static int key_set_server_type(int event, void *arg)
+{
+  int ret, fd;
+  off_t offset = 1030;
+  char *mode = (char*)arg;
+  uint8_t val;
+
+  if (event == KEY_AFTER_INI) // Do nothing
+    return 0;
+
+  // Update server type in EEPROM
+  fd = open(MB_EEPROM, O_RDWR);
+  if (fd < 0)
+    return -1;
+
+  ret = lseek(fd, offset, SEEK_SET);
+  if (ret < 0)
+    goto exit;
+
+  if (!strcmp(mode, "2") || !strcmp(mode, "4") || !strcmp(mode, "8")) {
+    val = mode[0] - '0';
+    if (write(fd, &val, 1) != 1)
+      ret = -1;
+  } else {
+    syslog(LOG_WARNING, "Server socket mode %s is not supported", mode);
+    ret = -1;
+  }
+
+exit:
+  close(fd);
+  return ret;
+}
 
 int write_device(const char *device, int value)
 {
@@ -219,43 +272,6 @@ int pal_set_def_key_value()
   return 0;
 }
 
-static int key_set_asic_mfr(int event, void *arg)
-{
-  int ret, fd;
-  off_t offset = 1030;
-  char *vendor = (char*)arg;
-  char vendor_id;
-
-  if (event == KEY_AFTER_INI) // Do nothing
-    return 0;
-
-  // Update vendor id in EEPROM
-  fd = open(MB_EEPROM, O_RDWR);
-  if (fd < 0)
-    return -1;
-
-  ret = lseek(fd, offset, SEEK_SET);
-  if (ret < 0)
-    goto exit;
-
-  if (!strcmp(vendor, MFR_AMD)) {
-    vendor_id = GPU_AMD;
-  } else if (!strcmp(vendor, MFR_NV)) {
-    vendor_id = GPU_NV;
-  } else {
-    syslog(LOG_WARNING, "%s is not supported", vendor);
-    ret = -1;
-    goto exit;
-  }
-
-  ret = write(fd, &vendor_id, 1);
-  if (ret != 1)
-    ret = -1;
-exit:
-  close(fd);
-  return ret;
-}
-
 int pal_channel_to_bus(int channel)
 {
   switch (channel) {
@@ -303,7 +319,7 @@ int pal_get_fruid_eeprom_path(uint8_t fru, char *path)
     sprintf(path, PDB_EEPROM);
   } else if (fru == FRU_BSM) {
     get_board_rev_id(&rev_id);
-    if (rev_id < 0x5)
+    if (rev_id < 0x4)
       sprintf(path, BSM_EEPROM, 13, 13);
     else
       sprintf(path, BSM_EEPROM, 4, 4);
@@ -319,16 +335,67 @@ int pal_get_fru_list(char *list)
   return 0;
 }
 
+int pal_get_fru_capability(uint8_t fru, unsigned int *caps)
+{
+  int ret = 0;
+
+  switch(fru) {
+    case FRU_MB:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL |
+        FRU_CAPABILITY_SERVER | FRU_CAPABILITY_POWER_STATUS |
+        FRU_CAPABILITY_POWER_ON | FRU_CAPABILITY_POWER_OFF |
+        FRU_CAPABILITY_POWER_CYCLE;
+      break;
+    case FRU_PDB:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL;
+      break;
+    case FRU_BSM:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL |
+        FRU_CAPABILITY_MANAGEMENT_CONTROLLER;
+      break;
+    case FRU_ASIC0:
+    case FRU_ASIC1:
+    case FRU_ASIC2:
+    case FRU_ASIC3:
+    case FRU_ASIC4:
+    case FRU_ASIC5:
+    case FRU_ASIC6:
+    case FRU_ASIC7:
+      *caps = FRU_CAPABILITY_SENSOR_ALL;
+    default:
+      ret = -1;
+      break;
+  }
+  return ret;
+}
+
 int pal_get_fru_id(char *str, uint8_t *fru)
 {
   if (!strcmp(str, "all")) {
     *fru = FRU_ALL;
-  } else if (!strcmp(str, "mb") || !strcmp(str, "vr") || !strcmp(str, "bmc")) {
+  } else if (!strcmp(str, "mb") || !strcmp(str, "vr") || !strcmp(str, "bmc") ||
+             !strcmp(str, "ocpdbg") || !strcmp(str, "asic")) {
     *fru = FRU_MB;
   } else if (!strcmp(str, "pdb")) {
     *fru = FRU_PDB;
   } else if (!strcmp(str, "bsm")) {
     *fru = FRU_BSM;
+  } else if (!strcmp(str, "asic0")) {
+    *fru = FRU_ASIC0;
+  } else if (!strcmp(str, "asic1")) {
+    *fru = FRU_ASIC1;
+  } else if (!strcmp(str, "asic2")) {
+    *fru = FRU_ASIC2;
+  } else if (!strcmp(str, "asic3")) {
+    *fru = FRU_ASIC3;
+  } else if (!strcmp(str, "asic4")) {
+    *fru = FRU_ASIC4;
+  } else if (!strcmp(str, "asic5")) {
+    *fru = FRU_ASIC5;
+  } else if (!strcmp(str, "asic6")) {
+    *fru = FRU_ASIC6;
+  } else if (!strcmp(str, "asic7")) {
+    *fru = FRU_ASIC7;
   } else {
     syslog(LOG_WARNING, "%s: Wrong fru name %s", __func__, str);
     return -1;
@@ -353,27 +420,53 @@ int pal_get_fruid_name(uint8_t fru, char *name)
 
 int pal_is_fru_ready(uint8_t fru, uint8_t *status)
 {
-  if (fru == FRU_MB || fru == FRU_PDB || fru == FRU_BSM)
-    *status = 1;
-  else
+  if (fru > FRU_ASIC7)
     return -1;
 
+  *status = 1;
   return 0;
 }
 
 int pal_get_fru_name(uint8_t fru, char *name)
 {
-  if (fru == FRU_MB) {
-    strcpy(name, "mb");
-  } else if (fru == FRU_PDB) {
-    strcpy(name, "pdb");
-  } else if (fru == FRU_BSM) {
-    strcpy(name, "bsm");
-  } else {
-    syslog(LOG_WARNING, "%s: Wrong fruid %d", __func__, fru);
-    return -1;
+  switch (fru) {
+    case FRU_MB:
+      sprintf(name, "mb");
+      break;
+    case FRU_PDB:
+      sprintf(name, "pdb");
+      break;
+    case FRU_ASIC0:
+      sprintf(name, "asic0");
+      break;
+    case FRU_ASIC1:
+      sprintf(name, "asic1");
+      break;
+    case FRU_ASIC2:
+      sprintf(name, "asic2");
+      break;
+    case FRU_ASIC3:
+      sprintf(name, "asic3");
+      break;
+    case FRU_ASIC4:
+      sprintf(name, "asic4");
+      break;
+    case FRU_ASIC5:
+      sprintf(name, "asic5");
+      break;
+    case FRU_ASIC6:
+      sprintf(name, "asic6");
+      break;
+    case FRU_ASIC7:
+      sprintf(name, "asic7");
+      break;
+    case FRU_BSM:
+      sprintf(name, "bsm");
+      break;
+    default:
+      syslog(LOG_WARNING, "%s: Wrong fruid %d", __func__, fru);
+      return -1;
   }
-
   return 0;
 }
 
@@ -703,10 +796,37 @@ bool is_device_ready()
   return false;
 }
 
+static bool cpld_power_permission()
+{
+  bool ret = false;
+  gpio_value_t value;
+  gpio_desc_t *gpio = gpio_open_by_shadow("PWR_CTRL");
+
+  if (!gpio) {
+    return false;
+  }
+
+  if (gpio_get_value(gpio, &value) < 0) {
+    goto bail;
+  }
+
+  if (value == GPIO_VALUE_HIGH)
+    ret = true;
+  else
+    printf("Block power change while server is present\n");
+
+bail:
+  gpio_close(gpio);
+  return ret;
+}
+
 // Power Off, Power On, or Power Cycle
 int pal_set_server_power(uint8_t fru, uint8_t cmd)
 {
   uint8_t status;
+
+  if (!cpld_power_permission())
+    return -2; // make power-util not to retry
 
   if (pal_get_server_power(fru, &status) < 0) {
     return -1;
@@ -750,23 +870,26 @@ void* chassis_control_handler(void *arg)
       if (pal_set_server_power(FRU_MB, SERVER_POWER_OFF) < 0)
         syslog(LOG_CRIT, "SERVER_POWER_OFF failed");
       else
-	syslog(LOG_CRIT, "SERVER_POWER_OFF successful");
+        syslog(LOG_CRIT, "SERVER_POWER_OFF successful");
       break;
     case 0x01:  // power on
       if (pal_set_server_power(FRU_MB, SERVER_POWER_ON) < 0)
         syslog(LOG_CRIT, "SERVER_POWER_ON failed");
       else
-	syslog(LOG_CRIT, "SERVER_POWER_ON successful");
+        syslog(LOG_CRIT, "SERVER_POWER_ON successful");
       break;
     case 0x02:  // power cycle
       if (pal_set_server_power(FRU_MB, SERVER_POWER_CYCLE) < 0)
         syslog(LOG_CRIT, "SERVER_POWER_CYCLE failed");
       else
-	syslog(LOG_CRIT, "SERVER_POWER_CYCLE successful");
+        syslog(LOG_CRIT, "SERVER_POWER_CYCLE successful");
       break;
     case 0xAC:  // sled-cycle with delay 4 secs
-      sleep(4);
-      pal_sled_cycle();
+      sleep(3);
+      pal_update_ts_sled();
+      sync();
+      sleep(1);
+      pal_force_sled_cycle();
       break;
     default:
       syslog(LOG_CRIT, "Invalid command 0x%x for chassis control", cmd);
@@ -782,8 +905,15 @@ int pal_chassis_control(uint8_t fru, uint8_t *req_data, uint8_t req_len)
   pthread_t tid;
   pthread_attr_t a;
 
+  if (fru == 2 && !cpld_power_permission()) {
+    // If came from BMC itself
+    return CC_NOT_SUPP_IN_CURR_STATE;
+  }
   if (req_len != 1) {
     return CC_INVALID_LENGTH;
+  }
+  if (pal_is_fw_update_ongoing(FRU_MB)) {
+    return CC_NOT_SUPP_IN_CURR_STATE;
   }
 
   cmd = req_data[0];
@@ -812,36 +942,61 @@ void pal_get_chassis_status(uint8_t fru, uint8_t *req_data, uint8_t *res_data, u
 
 int pal_sled_cycle(void)
 {
-  int index;
+  return cpld_power_permission()? pal_force_sled_cycle(): -1;
+}
+
+// TODO:
+//   Remove evt_compat if all of EVT PDB are replaced
+int pal_force_sled_cycle(void)
+{
+  int index, i;
   struct dirent *dp;
   DIR *dir;
-  char path[128] = {0};
   char device[LARGEST_DEVICE_NAME] = {0};
+  const char *HSC_DIR[6] = {
+    P12V_1_HWMON_DIR, P12V_2_HWMON_DIR, P12V_AUX_HWMON_DIR,
+    P12V_1_DIR, P12V_2_DIR, P12V_AUX_DIR
+  };
 
-  snprintf(path, sizeof(path), P12V_AUX_HWMON_DIR);
-  dir = opendir(path);
-  if (dir == NULL)
-    goto evt_compat;
+  for (i = 0; i < 3; i++) {
+    dir = opendir(HSC_DIR[i]);
+    if (dir == NULL) {
+      if (i == 2)
+        goto evt_compat;
+      else
+        goto err_exit;
+    }
 
-  while ((dp = readdir(dir)) != NULL) {
-    if (sscanf(dp->d_name, "hwmon%d", &index))
-      break;
-  }
-  if (dp == NULL) {
+    while ((dp = readdir(dir)) != NULL) {
+      if (sscanf(dp->d_name, "hwmon%d", &index))
+        break;
+    }
+    if (dp == NULL) {
+      closedir(dir);
+      if (i == 2)
+        goto evt_compat;
+      else
+        goto err_exit;
+    }
+
     closedir(dir);
-    goto evt_compat;
+    // reboot HSC
+    if (i == 2)
+      snprintf(device, LARGEST_DEVICE_NAME, P12V_AUX_DIR, index, ADM1278_REBOOT);
+    else
+      snprintf(device, LARGEST_DEVICE_NAME, HSC_DIR[i+3], index, LTC4282_REBOOT);
+
+    if (write_device(device, 1) < 0) {
+      if (i == 2)
+        goto evt_compat;
+      else
+        goto err_exit;
+    }
   }
-
-  closedir(dir);
-  // reboot ADM1278 for 12V cycle
-  snprintf(device, LARGEST_DEVICE_NAME, P12V_AUX_DIR, index, ADM1278_REBOOT);
-  if (write_device(device, 1) < 0)
-    goto evt_compat;
-
   return 0;
+
 evt_compat:
-  snprintf(path, sizeof(path), LTC4282_AUX_HWMON_DIR);
-  dir = opendir(path);
+  dir = opendir(LTC4282_AUX_HWMON_DIR);
   if (dir == NULL)
     goto err_exit;
 
@@ -866,11 +1021,25 @@ err_exit:
 
 int pal_is_fru_prsnt(uint8_t fru, uint8_t *status)
 {
-  if (fru == FRU_MB || fru == FRU_PDB || fru == FRU_BSM)
-    *status = 1;
-  else
-    return -1;
-
+  switch (fru) {
+    case FRU_MB:
+    case FRU_PDB:
+    case FRU_BSM:
+      *status = 1;
+      break;
+    case FRU_ASIC0:
+    case FRU_ASIC1:
+    case FRU_ASIC2:
+    case FRU_ASIC3:
+    case FRU_ASIC4:
+    case FRU_ASIC5:
+    case FRU_ASIC6:
+    case FRU_ASIC7:
+      *status = is_asic_prsnt(fru-FRU_ASIC0)? 1: 0;
+      break;
+    default:
+      return -1;
+  }
   return 0;
 }
 
@@ -898,7 +1067,7 @@ static void fan_state_led_ctrl(uint8_t snr_num, bool assert)
   if (!assert_flag[fan_id]) {
     // If all of assertion had been cleared or it is the first assertion
     if (gpio_set_value(fan_fail, assert? GPIO_VALUE_HIGH: GPIO_VALUE_LOW) ||
-	gpio_set_value(fan_ok, assert? GPIO_VALUE_LOW: GPIO_VALUE_HIGH)) {
+        gpio_set_value(fan_ok, assert? GPIO_VALUE_LOW: GPIO_VALUE_HIGH)) {
       syslog(LOG_WARNING, "FAN LED control failed");
     }
   }
@@ -1006,10 +1175,10 @@ void pal_dump_key_value(void)
   while (strcmp(key_cfg[i].name, LAST_KEY)) {
     printf("%s:", key_cfg[i].name);
     if ((ret = kv_get(key_cfg[i].name, value, NULL, KV_FPERSIST)) < 0) {
-    printf("\n");
-  } else {
-    printf("%s\n",  value);
-  }
+      printf("\n");
+    } else {
+      printf("%s\n",  value);
+    }
     i++;
     memset(value, 0, MAX_VALUE_LEN);
   }
@@ -1020,11 +1189,11 @@ int pal_set_host_system_mode(uint8_t mode)
   int ret;
 
   if (mode == 0x00) {
-    ret = kv_set("server_type", "8", 0, KV_FPERSIST); // 8S
+    ret = pal_set_key_value("server_type", "8");      // 8S
   } else if (mode == 0x01) {
-    ret = kv_set("server_type", "4", 0, KV_FPERSIST); // 4S
+    ret = pal_set_key_value("server_type", "4");      // 4S
   } else if (mode == 0x02) {
-    ret = kv_set("server_type", "2", 0, KV_FPERSIST); // 2S
+    ret = pal_set_key_value("server_type", "2");      // 2S
   } else {
     return CC_INVALID_PARAM;
   }
@@ -1148,62 +1317,14 @@ pal_get_pfr_address(uint8_t fru, uint8_t *bus, uint8_t *addr, bool *bridged) {
   return 0;
 }
 
-int pal_check_power_seq()
+int pal_slotid_to_fruid(int slotid)
 {
-  struct power_seq {
-    char *name;
-    uint8_t offset;
-    uint8_t bit;
-  } cpld_power_seq[] = {
-    {"MODULE_PWRGD_ASIC0", 0, 0}, {"MODULE_PWRGD_ASIC1", 0, 1},
-    {"MODULE_PWRGD_ASIC2", 0, 2}, {"MODULE_PWRGD_ASIC3", 0, 3},
-    {"MODULE_PWRGD_ASIC4", 0, 4}, {"MODULE_PWRGD_ASIC5", 0, 5},
-    {"MODULE_PWRGD_ASIC6", 0, 6}, {"MODULE_PWRGD_ASIC7", 0, 7},
-    {"MB1_1_ASIC_PWR_EN", 1, 0}, {"MB2_ASIC_PWR_EN", 1, 1},
-    {"MB3_1_ASIC_PWR_EN", 1, 2}, {"MB0_ASIC_PWR_EN", 1, 3},
-    {"ASIC_MB1_1_PWRGOOD", 1, 4}, {"ASIC_MB2_PWRGOOD", 1, 5},
-    {"ASIC_MB3_1_PWRGOOD", 1, 6}, {"ASIC_MB0_PWRGOOD", 1, 7},
-    {"BMC_READY_CPLD", 2, 0}
-  };
-  char dev_cpld[16] = {0};
-  char event_str[64] = {0};
-  int fd, i;
-  int ret = 0, fail_addr = -1;
-  uint8_t tbuf[8], rbuf[8], value;
-  uint8_t power_seq_num = sizeof(cpld_power_seq)/sizeof(struct power_seq);
+  // FRU ID remapping, we start from FRU_MB = 1
+  return slotid + 1;
+}
 
-  sprintf(dev_cpld, "/dev/i2c-%d", MAIN_CPLD_BUS);
-  fd = open(dev_cpld, O_RDWR);
-  if (fd < 0) {
-    return -1;
-  }
-
-  tbuf[0] = 0x31; // Error state
-  ret = i2c_rdwr_msg_transfer(fd, MAIN_CPLD_ADDR, tbuf, 1, rbuf, 1);
-  if (ret < 0 || rbuf[0] == 0xff) // Read error or power is turned off normally
-    goto exit;
-
-  tbuf[0] = 0x32;
-  ret = i2c_rdwr_msg_transfer(fd, MAIN_CPLD_ADDR, tbuf, 1, rbuf, 3);
-  if (ret < 0)
-    goto exit;
-
-  for (i = 0; i < power_seq_num; i++) {
-    value = rbuf[cpld_power_seq[i].offset] & (1 << cpld_power_seq[i].bit);
-    if (value == 0) {
-      fail_addr = i;
-      snprintf(event_str, sizeof(event_str), "%s power rail fails", cpld_power_seq[i].name);
-      syslog(LOG_CRIT, "%s", event_str);
-      pal_add_cri_sel(event_str);
-    }
-  }
-  if (fail_addr < 0) {
-      snprintf(event_str, sizeof(event_str), "Unknown power rail fails");
-      syslog(LOG_CRIT, "Unknown power rail fails");
-      pal_add_cri_sel(event_str);
-  }
-
-exit:
-  close(fd);
-  return ret;
+int pal_devnum_to_fruid(int devnum)
+{
+  // 1 = server, 2 = BMC ifself
+  return devnum == 0? 2: devnum;
 }

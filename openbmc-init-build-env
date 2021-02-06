@@ -3,7 +3,7 @@
 if [ -n "$DISTRO_OVERRIDE" ]; then
   echo "WARNING: distro is set to ${DISTRO_OVERRIDE} based on DISTRO_OVERRIDE env variable"
 elif [ -z "$DISTRO_DEFAULT" ]; then
-  DISTRO_DEFAULT=rocko
+  DISTRO_DEFAULT=zeus
 else
   echo "WARNING: default distro is set to ${DISTRO_DEFAULT} based on DISTRO_DEFAULT env variable"
 fi
@@ -11,18 +11,40 @@ fi
 declare -a PLAT_DISTRO_OVERRIDES
 # Add overrides here on a per-platform basis.
 PLAT_DISTRO_OVERRIDES=(
+# master / rolling-release platforms
+#   -- none --
+# gatesgarth platforms (latest)
+#   -- none --
+# dunfell platforms (pending upgrade)
+#   -- none --
+# zeus platforms (pending upgrade)
   meta-qemux86:zeus
-  meta-cloudripper:warrior
-  meta-wedge400:warrior
   meta-fbal:zeus
   meta-fbep:zeus
   meta-clearcreek:zeus
   meta-fbsp:zeus
-  meta-fby3:warrior
-  meta-fuji:warrior
-  meta-elbert:warrior
-  meta-grandcanyon:warrior
+  meta-fby3:zeus
+  meta-grandcanyon:zeus
   meta-cmm:zeus
+  meta-elbert:zeus
+  meta-cloudripper:zeus
+  meta-fuji:zeus
+  meta-fby2-nd:zeus
+  meta-minipack:zeus
+# warrior platforms (pending upgrade)
+  meta-wedge400:warrior
+# Legacy platforms pending kernel upgrade
+  meta-fby2-gpv2:rocko
+  meta-fby2:rocko
+  meta-yosemite:rocko
+  meta-fbtp:rocko
+  meta-fbttn:rocko
+  meta-wedge:rocko
+  meta-minilaketb:rocko
+  meta-yamp:rocko
+  meta-lightning:rocko
+  meta-wedge100:rocko
+  meta-galaxy100:rocko
 )
 
 platform="$1"
@@ -64,7 +86,7 @@ if [ -z "$TEMPLATECONF" ]; then
     elif [ -d "$(pwd)/meta-$1" ]; then
         TEMPLATECONF="$(pwd)/meta-$1/conf"
     else
-        machines=$(find . -maxdepth 6 -wholename "*/machine/*" -type f)
+        machines=$(find . -maxdepth 6 -path "*/machine/*" '(' -type f -o -type l ')' )
         for md in ${machines}; do
             machine=$(basename "$md" | sed 's/\.conf//')
             meta=$(dirname "$(dirname "$md")")
@@ -93,6 +115,7 @@ if [ -z "$DISTRO_OVERRIDE" ]; then
         if [[ "${platform/${override_plat}/}" != "${platform}" ]]; then
             # override happens
             _distro="${override_distro}"
+            break
         fi
     done
 fi
@@ -101,10 +124,15 @@ unset override override_plat override_distro
 
 echo "Init build environment for platform '${platform}' with distro ${_distro}..."
 unset platform
+
+# Sourcing the Yocto script causes the pwd to change to the build directory.
+# Keep it around so that we can source scripts out of our tree afterward.
+REPO_ROOT="$(pwd)"
+
 # shellcheck disable=SC1090
 # distro can vary, so we can't use a shellcheck directive to point to next
 . "yocto/${_distro}/poky/oe-init-build-env" "$@"
 
-if [ -d "../facebook" ]; then
-  ../facebook/facebookify.sh "$(pwd)"
+if [ -d "${REPO_ROOT}/facebook" ]; then
+  "${REPO_ROOT}/facebook/facebookify.sh" "$(pwd)"
 fi

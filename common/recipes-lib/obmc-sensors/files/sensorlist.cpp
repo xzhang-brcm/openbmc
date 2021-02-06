@@ -24,19 +24,7 @@ using namespace std;
 
 SensorList::SensorList(const char *conf_file)
 {
-  FILE *f = conf_file ? fopen(conf_file, "r") : NULL;
-  sensors_init(f);
-  if (f)
-    fclose(f);
-  try {
-    enumerate();
-  } catch (std::out_of_range &e) {
-    syslog(LOG_ERR, "Initialization: Out of range exception: %s\n", e.what());
-  } catch (std::system_error &e) {
-    syslog(LOG_ERR, "Initialization: System error: %s - %s\n", e.code().message().c_str(), e.what());
-  } catch (...) {
-    syslog(LOG_CRIT, "Initialization: Unknown error");
-  }
+  _sensor_list_build(conf_file);
 }
 
 
@@ -50,7 +38,7 @@ unique_ptr<SensorChip> SensorList::make_chip(const sensors_chip_name *chip, cons
   if (name == "ast_pwm-isa-0000") {
     return unique_ptr<LegacyFanSensorChip>(new LegacyFanSensorChip(chip, name));
   }
-  if (name == "aspeed_pwm_tacho-isa-0000") { 
+  if (name == "aspeed_pwm_tacho-isa-0000" || name == "aspeed_pwm_tachometer-isa-0000") { 
     return unique_ptr<FanSensorChip>(new FanSensorChip(chip, name));
   }
   return unique_ptr<SensorChip>(new SensorChip(chip, name));
@@ -73,5 +61,35 @@ void SensorList::enumerate()
     }
     (*this)[name] = make_chip(chip, name);
     (*this)[name]->enumerate();
+  }
+}
+
+void SensorList::re_enumerate(const char *conf_file)
+{
+  sensors_cleanup();
+  this->clear();
+
+  _sensor_list_build(conf_file);
+}
+
+void SensorList::_sensor_list_build(const char* conf_file)
+{
+  FILE *f = NULL;
+
+  if (conf_file != NULL) {
+    f = fopen(conf_file, "r");
+  }
+  sensors_init(f);
+  if (f != NULL) {
+    fclose(f);
+  }
+  try {
+    enumerate();
+  } catch (std::out_of_range &e) {
+    syslog(LOG_ERR, "Initialization: Out of range exception: %s\n", e.what());
+  } catch (std::system_error &e) {
+    syslog(LOG_ERR, "Initialization: System error: %s - %s\n", e.code().message().c_str(), e.what());
+  } catch (...) {
+    syslog(LOG_CRIT, "Initialization: Unknown error");
   }
 }

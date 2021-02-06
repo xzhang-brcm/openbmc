@@ -22,7 +22,6 @@ import argparse
 import hashlib
 import json
 import os
-import pprint
 import re
 import socket
 import subprocess
@@ -731,10 +730,7 @@ def load_image_meta(full_image, logger):
 
 def get_partitions_according_meta(full_image, image_meta, logger):
     # type: (ImageSourcesType, List[str], dict, logging.Logger) -> List[Partition]
-    logger.info(
-        "get partitions according to following image_meta:\n %s"
-        % pprint.pformat(image_meta, indent=4)
-    )
+    logger.info("get partitions according to following image_meta:\n %s" % image_meta)
 
     partitions = []
     with VirtualCat([full_image]) as vc:
@@ -893,6 +889,10 @@ def get_valid_partitions(images_or_mtds, checksums, logger):
 
 
 def other_flasher_running(logger):
+    if os.path.exists("/opt/flashy"):
+        logger.error("Flashy found: /opt/flashy found in this system")
+        return True
+
     # type: (logging.Logger) -> bool
     basenames = [
         b"autodump.sh",

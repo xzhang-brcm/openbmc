@@ -25,12 +25,15 @@
 extern "C" {
 #endif
 
-#define MFR_AMD "AMD"
-#define MFR_NV  "NVIDIA"
+#define MFR_AMD      "AMD"
+#define MFR_NVIDIA   "NVIDIA"
+#define MFR_UNKNOWN  "UNKNOWN"
+
+#define asic_slot_to_bus(x) ((~(x) >> 1) & 0xB)
 
 enum {
-  GPU_AMD = 0,
-  GPU_NV,
+  GPU_NVIDIA = 0,
+  GPU_AMD,
   GPU_UNKNOWN
 };
 
@@ -42,12 +45,15 @@ enum {
   ASIC_NOTSUP = -2
 };
 
+uint8_t asic_get_vendor_id(uint8_t);
 int asic_read_gpu_temp(uint8_t, float*);
 int asic_read_board_temp(uint8_t, float*);
 int asic_read_mem_temp(uint8_t, float*);
 int asic_read_pwcs(uint8_t, float*);
 bool is_asic_prsnt(uint8_t);
 int asic_set_power_limit(uint8_t, unsigned int);
+int asic_get_power_limit(uint8_t, unsigned int*);
+int asic_show_version(uint8_t, char*);
 
 #ifdef __cplusplus
 } // extern "C"

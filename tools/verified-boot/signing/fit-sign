@@ -174,6 +174,8 @@ def sign_firmware(dts):
                 "-p", "%08x" % args.size, "-r", tmp2.name]
             if args.token:
                 cmd += ['-N', 'pkcs11']
+            elif args.keyname:
+                cmd += ['-N', 'FB-HSM']
             print(" ".join(cmd))
             spawn.spawn(cmd)
             info = os.stat(tmp2.name)
@@ -197,6 +199,8 @@ def sign_os(dts):
                 "-r", tmp2.name]
             if args.token:
                 cmd += ['-N', 'pkcs11']
+            elif args.keyname:
+                cmd += ['-N', 'FB-HSM']
             print(" ".join(cmd))
             spawn.spawn(cmd)
             info = os.stat(tmp2.name)
@@ -223,7 +227,10 @@ def set_hint(fdt, path):
 
     # The U-Boot FIT expects to be signed with the following key-name.
     # This will cause mkimage to file if the names do not match.
-    if args.token_hint is not None:
+    if args.keyname is not None:
+        hint.strings = [os.path.basename(args.keyname)]
+        return 0
+    elif args.token_hint is not None:
         hint.strings = [args.token_hint]
         return 0
     key_name = hint[0]
@@ -477,17 +484,36 @@ if __name__ == '__main__':
     parser.add_argument('--test-change-timestamp', default=False,
         action='store_true',
         help='For testing, alter the timestamp node')
+    parser.add_argument('--token-hint', metavar="HINT")
+    parser.add_argument('--platform', metavar="PLATFORM",
+        help="specify the PLATFORM to sign")
+    parser.add_argument('--hsm-algo', metavar="HSMALGO",
+        help="specify hsm signing algorithm as HSMALGO")
+    parser.add_argument('--force', default=False,
+        action='store_true',
+        help='skip the signing key and image sanity check, if know what you are doing')
+
+    # specify signing key: exclusive
+    # --keydir: the key in local directory
+    # --keyname: use FB HSM key
+    # --token: use the token key
+    # --lock: no key needed
     pkey = parser.add_mutually_exclusive_group(required=True)
+    pkey.add_argument('--keyname', metavar="HSMKEYNAME",
+        help="Use HSMKEYNAME hsm based key to sign")
     pkey.add_argument('--keydir', metavar="DIR",
         help="Path to directory containing '.key' private key")
     pkey.add_argument('--token', metavar="SERIAL",
         help="Hardware token serial identifier")
     pkey.add_argument('--lock', default=False, action='store_true',
         help='Make a (unsigned) flash set the HW enforce bit')
-    parser.add_argument('--token-hint', metavar="HINT")
+
     args = parser.parse_args()
 
-    if args.keydir is not None:
+    if args.keyname is not None:
+        # set keydir with pathname in hsm key name
+        args.keydir = os.path.dirname(args.keyname)
+    elif args.keydir is not None:
         # Using a keydir to sign a flash.
         pkcs11.clear_environment()
         if not os.path.isdir(args.keydir):
@@ -518,5 +544,15 @@ if __name__ == '__main__':
     except Exception as e:
         print("No image meta found: %s" % repr(e))
         print("Signing legacy image")
+
+    if not ( args.lock or args.force ):
+        if args.keyname is None and image_meta is not None:
+            print("Please use HSM key (--keyname <hsm/key/name>) to sign new image")
+            print("Or (--force) to sign without using HSM key")
+            sys.exit(2)
+        if args.keyname is not None and image_meta is None:
+            print("Please don't use HSM key to sign legacy image")
+            print("Or (--force) to sign using HSM key")
+            sys.exit(3)
 
     sys.exit(main())

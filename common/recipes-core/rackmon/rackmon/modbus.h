@@ -24,10 +24,16 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <termios.h>
 
 #include <openbmc/log.h>
 
+#ifndef DEFAULT_TTY
 #define DEFAULT_TTY "/dev/ttyS3"
+#endif
+
+// Modbus retry count
+#define MAX_RETRY   5
 
 // Modbus errors
 #define MODBUS_RESPONSE_TIMEOUT -4
@@ -35,6 +41,7 @@
 
 // Modbus constants
 #define MODBUS_READ_HOLDING_REGISTERS 3
+#define MODBUS_WRITE_HOLDING_REGISTERS 6
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(_a) (sizeof(_a) / sizeof((_a)[0]))
@@ -86,11 +93,12 @@ int waitfd(int fd);
 void decode_hex_in_place(char* buf, size_t* len);
 void append_modbus_crc16(char* buf, size_t* len);
 void print_hex(FILE* f, char* buf, size_t len);
+const char* baud_to_str(speed_t baudrate);
 
 // Read until maxlen bytes or no bytes in mdelay_us microseconds
 size_t read_wait(int fd, char* dst, size_t maxlen, int mdelay_us);
 
-int modbuscmd(modbus_req *req);
+int modbuscmd(modbus_req *req, speed_t baudrate);
 uint16_t modbus_crc16(char* buffer, size_t length);
 const char* modbus_strerror(int mb_err);
 

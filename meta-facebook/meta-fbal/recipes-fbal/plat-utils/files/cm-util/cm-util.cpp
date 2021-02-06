@@ -19,6 +19,7 @@
  */
 
 #include <iostream>
+#include  <iomanip>
 #include <set>
 #include <map>
 #include <string>
@@ -31,11 +32,12 @@ struct ModeDesc {
   const std::string desc;
 };
 
+struct UsbChDesc {
+  uint8_t channel;
+  const std::string desc;
+};
+
 const std::map<std::string, ModeDesc> mode_map = {
-    {"8S-0", {CM_MODE_8S_0, "8 Socket Mode, Tray 0 is primary"}},
-    {"8S-1", {CM_MODE_8S_1, "8 Socket Mode, Tray 1 is primary"}},
-    {"8S-2", {CM_MODE_8S_2, "8 Socket Mode, Tray 2 is primary"}},
-    {"8S-3", {CM_MODE_8S_3, "8 Socket Mode, Tray 3 is primary"}},
     {"2S", {CM_MODE_2S, "2 Socket Mode"}},
     {"4S-4OU", {CM_MODE_4S_4OU, "4 Socket mode, in 4OU mode"}},
     {"4S-2OU-0", {CM_MODE_4S_2OU_0, "4 Socket mode with Tray 0 as primary"}},
@@ -47,10 +49,7 @@ static int set_mode(uint8_t mode)
   uint8_t sys_mode;
   int rc = 0;
 
-  if (mode == CM_MODE_8S_0 || mode == CM_MODE_8S_1 ||
-      mode == CM_MODE_8S_2 || mode == CM_MODE_8S_3) {
-    sys_mode = MB_8S_MODE;
-  } else if (mode == CM_MODE_2S) {
+  if (mode == CM_MODE_2S) {
     sys_mode = MB_2S_MODE;
   } else if (mode == CM_MODE_4S_4OU || mode == CM_MODE_4S_2OU_0 ||
              mode == CM_MODE_4S_2OU_1) {
@@ -79,14 +78,15 @@ static std::set<std::string> get_bmcs()
   if (cmd_cmc_get_config_mode(&mode)) {
     return ret;
   }
-  ret.insert("tray0");
   ret.insert("emeraldpools");
-  if (mode >= 0 && mode < 4) {
-    ret.insert("tray1");
-    ret.insert("tray2");
-    ret.insert("tray3");
-  } else if (mode >= 5 && mode <= 7) {
-    ret.insert("tray1");
+  if (mode > 4) {
+    ret.insert("clearcreek");
+    uint8_t pos;
+    if (cmd_cmc_get_mb_position(&pos) || pos == 0) {
+      ret.insert("tray1");
+    } else {
+      ret.insert("tray0");
+    }
   }
   return ret;
 }
@@ -127,20 +127,6 @@ static int get_mode()
   return 0;
 }
 
-static int sled_cycle()
-{
-  int rc = 0;
-  if (is_ep_present() && pal_ep_sled_cycle() < 0) {
-    std::cerr << "Request JBOG sled-cycle failed\n";
-    rc = -1;
-  }
-  if (cmd_cmc_sled_cycle()) {
-    std::cerr << "Request chassis manager for a sled cycle failed\n";
-    rc = -1;
-  }
-  return rc;
-}
-
 static int
 get_pos() {
   uint8_t pos;
@@ -155,12 +141,17 @@ static int
 reset_bmc(const std::string& bmc)
 {
   if (bmc == "emeraldpools" && is_ep_present()) {
-    int fd = i2c_cdev_slave_open(0x6, 0x41, 0);
+    int fd = i2c_cdev_slave_open(EP_I2C_BUS_NUMBER, 0x41, 0);
     if (fd < 0)
       return -1;
     int rc = i2c_smbus_write_byte_data(fd, 0x3, 0xfe);
     rc |= i2c_smbus_write_byte_data(fd, 0x3, 0xff);
     close(fd);
+    return rc ? -1 : 0;
+  }
+  if (bmc == "clearcreek" && is_cc_present()) {
+    // TODO Add correct CC IOExpander address.
+    int rc = cmd_mb0_set_cc_reset(BMC1_SLAVE_DEF_ADDR);
     return rc ? -1 : 0;
   }
   const std::map<std::string, int> bmc_map = {
@@ -175,6 +166,74 @@ reset_bmc(const std::string& bmc)
   return 0;
 }
 
+static void
+print_mac(uint8_t mac[6])
+{
+  std::cout << std::setfill('0') << std::setw(2) << std::right << std::hex << int(mac[0]);
+  for (int i = 1; i < 6; i++) {
+    std::cout << ":" << std::setfill('0') << std::setw(2) << std::right << std::hex << int(mac[i]);
+  }
+  std::cout << std::endl;
+}
+
+static void
+print_linklocal(uint8_t mac[6])
+{
+  std::cout << std::setfill('0') << std::setw(2) << std::right << std::hex << 0xfe80 << "::";
+  std::cout << std::setfill('0') << std::setw(2) << std::right << std::hex << int(mac[0] ^ 2) << int(mac[1]) << ":";
+  std::cout << std::setfill('0') << std::setw(2) << std::right << std::hex << int(mac[2]) << 0xff << ":";
+  std::cout << std::setfill('0') << std::setw(2) << std::right << std::hex << 0xfe << int(mac[3]) << ":";
+  std::cout << std::setfill('0') << std::setw(2) << std::right << std::hex << int(mac[4]) << int(mac[5]) << std::endl;
+}
+
+static void
+print_ip6_addr(uint8_t addr[SIZE_IP6_ADDR])
+{
+  uint16_t v = addr[1] | (addr[0] << 8);
+  std::cout << std::hex << int(v);
+  for (int i = 2; i < SIZE_IP6_ADDR; i+=2) {
+    v = addr[i+1] | (addr[i] << 8);
+    std::cout << ":" << std::hex << int(v);
+  }
+  std::cout << '\n';
+}
+
+static int
+print_lan_info(const std::string& bmc)
+{
+  int (*get_lan_cfg)(uint8_t sel, uint8_t *buf, uint8_t *rlen);
+  if (bmc == "emeraldpools") {
+    get_lan_cfg = pal_ep_get_lan_config;
+  } else if (bmc == "clearcreek") {
+    get_lan_cfg = pal_cc_get_lan_config;
+  } else if (bmc == "tray0" || bmc == "tray1") {
+    get_lan_cfg = pal_peer_tray_get_lan_config;
+  } else {
+    std::cout << "Unsupported for " << bmc << std::endl;
+    return -1;
+  }
+
+  uint8_t mac[6];
+  uint8_t len;
+  std::cout << "MAC: ";
+  if (get_lan_cfg(LAN_PARAM_MAC_ADDR, mac, &len) || len != 6) {
+    std::cout << "Unknown\n";
+    std::cout << "Link-Local: Unknown\n";
+  } else {
+    print_mac(mac);
+    std::cout << "Link-Local: ";
+    print_linklocal(mac);
+  }
+  uint8_t addr[SIZE_IP6_ADDR];
+  std::cout << "IP6 Address: ";
+  if (get_lan_cfg(LAN_PARAM_IP6_ADDR, addr, &len) || len != SIZE_IP6_ADDR) {
+    std::cout << "Unknown\n";
+  } else {
+    print_ip6_addr(addr);
+  }
+  return 0;
+}
+
 int
 main(int argc, char **argv) {
   int rc = -1;
@@ -182,9 +241,10 @@ main(int argc, char **argv) {
   CLI::App app("Chassis Management Utility");
   app.failure_message(CLI::FailureMessage::help);
 
+//Set Mode Initial
   std::string op_mode;
   std::set<std::string> allowed_modes;
-  std::string desc = "Set chassis operating mode\n";
+  std::string desc = "Set chassis operating mode\n";  
   for (const auto& pair : mode_map) {
     allowed_modes.insert(pair.first);
     desc += pair.first + ": " + pair.second.desc + "\n";
@@ -193,7 +253,8 @@ main(int argc, char **argv) {
                           allowed_modes,
                           desc
                          )->ignore_case();
-  app.add_flag("--sled-cycle", do_cycle,
+
+  app.add_flag("--recfg-cycle", do_cycle,
                "Perform a SLED cycle after operations (If any)");
   app.require_option();
   bool get_mode_f = false;
@@ -204,6 +265,9 @@ main(int argc, char **argv) {
 
   std::string bmc_to_reset{};
   auto rstbmc = app.add_set("--reset-bmc", bmc_to_reset, get_bmcs(), "Reset BMC in the specified Tray");
+
+  std::string bmc_to_get_lan{};
+  auto laninfo = app.add_set("--get-lan", bmc_to_get_lan, get_bmcs(), "Get LAN/Network information of the given BMC");
 
   CLI11_PARSE(app, argc, argv);
 
@@ -219,12 +283,16 @@ main(int argc, char **argv) {
     return reset_bmc(bmc_to_reset);
   }
 
+  if (*laninfo) {
+    return print_lan_info(bmc_to_get_lan);
+  }
+
   if (*mode) {
     rc = set_mode(mode_map.at(op_mode).mode);
   }
 
   if (do_cycle) {
-    rc = sled_cycle();
+    rc = pal_recfg_sled_cycle();
   }
 
   return rc;

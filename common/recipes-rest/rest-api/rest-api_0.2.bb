@@ -17,6 +17,7 @@
 
 inherit python3unittest
 inherit ptest
+inherit systemd
 
 SUMMARY = "Rest API Daemon"
 DESCRIPTION = "Daemon to handle RESTful interface."
@@ -34,7 +35,6 @@ SRC_URI = "file://rest.py \
            file://acl_providers/__init__.py\
            file://acl_providers/cached_acl_provider.py\
            file://acl_providers/common_acl_provider_base.py\
-           file://acl_providers/dummy_acl_provider.py\
            file://plat_tree.py \
            file://rest_crawler.py \
            file://node.py \
@@ -43,6 +43,7 @@ SRC_URI = "file://rest.py \
            file://vboot.py \
            file://rest.cfg \
            file://rest_config.py \
+           file://rest_fscd_sensor_data.py \
            file://node_bmc.py \
            file://node_api.py \
            file://node_dpb.py \
@@ -74,6 +75,11 @@ SRC_URI = "file://rest.py \
            file://test_auth_enforcer.py \
            file://test_common_logging.py \
            file://test_rest_config.py \
+           file://test_rest_fscd_sensor_data.py \
+           file://test_rest_gpios.py \
+           file://test_common_auth.py \
+           file://test_common_acl_provider_base.py \
+           file://restapi.service \
           "
 
 S = "${WORKDIR}"
@@ -93,6 +99,7 @@ do_install_class-target() {
   install -d $dst
   install -d $bin
   install -d $acld
+  install -d ${D}${sysconfdir}
   for f in ${S}/*.py; do
     n=$(basename $f)
     install -m 755 "$f" ${dst}/$n
@@ -103,14 +110,31 @@ do_install_class-target() {
     install -m 755 "$f" ${acld}/$n
     ln -snf ../fbpackages/${pkgdir}/acl_providers/$n ${bin}/$n
   done
-  install -d ${D}${sysconfdir}/sv
-  install -d ${D}${sysconfdir}/sv/restapi
-  install -m 755 ${WORKDIR}/run_rest ${D}${sysconfdir}/sv/restapi/run
+
+  if ${@bb.utils.contains('DISTRO_FEATURES', 'systemd', 'true', 'false', d)}; then
+      install_systemd
+  else
+      install_sysv
+  fi
+
   install -m 644 ${WORKDIR}/rest.cfg ${D}${sysconfdir}/rest.cfg
-  install -d ${D}${sysconfdir}/init.d
-  install -d ${D}${sysconfdir}/rcS.d
-  install -m 755 ${WORKDIR}/setup-rest-api.sh ${D}${sysconfdir}/init.d/setup-rest-api.sh
-  update-rc.d -r ${D} setup-rest-api.sh start 95 5 .
+}
+
+
+install_systemd() {
+    install -d ${D}${systemd_system_unitdir}
+    install -m 0644 ${WORKDIR}/restapi.service ${D}${systemd_system_unitdir}
+}
+
+
+install_sysv() {
+    install -d ${D}${sysconfdir}/sv
+    install -d ${D}${sysconfdir}/sv/restapi
+    install -m 755 ${WORKDIR}/run_rest ${D}${sysconfdir}/sv/restapi/run
+    install -d ${D}${sysconfdir}/init.d
+    install -d ${D}${sysconfdir}/rcS.d
+    install -m 755 ${WORKDIR}/setup-rest-api.sh ${D}${sysconfdir}/init.d/setup-rest-api.sh
+    update-rc.d -r ${D} setup-rest-api.sh start 95 2 3 4 5  .
 }
 
 
@@ -121,3 +145,5 @@ FBPACKAGEDIR = "${prefix}/local/fbpackages"
 
 FILES_${PN} = "${FBPACKAGEDIR}/rest-api ${prefix}/local/bin ${sysconfdir} "
 FILES_${PN}-ptest = "${libdir}/rest-api/ptest/run-ptest"
+
+SYSTEMD_SERVICE_${PN} = "restapi.service"

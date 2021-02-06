@@ -27,11 +27,17 @@ extern "C" {
 
 #include "bic_xfer.h"
 #include "bic.h"
+#include <libusb-1.0/libusb.h>
 
 #define BIOS_CAPSULE_OFFSET 0x7F0000
 #define CPLD_CAPSULE_OFFSET 0x17F0000
 
-int bic_get_fw_cksum(uint8_t slot_id, uint8_t target, uint32_t offset, uint32_t len, uint8_t *ver);
+int print_configuration(struct libusb_device_handle *hDevice,struct libusb_config_descriptor *config);
+int active_config(struct libusb_device *dev,struct libusb_device_handle *handle);
+int bic_get_fw_cksum(uint8_t slot_id, uint8_t target, uint32_t offset, uint32_t len, uint8_t *cksum);
+int bic_get_fw_cksum_sha256(uint8_t slot_id, uint8_t target, uint32_t offset, uint32_t len, uint8_t *cksum);
+int bic_init_usb_dev(uint8_t slot_id, usb_dev* udev, const uint16_t product_id, const uint16_t vendor_id);
+int bic_close_usb_dev(usb_dev* udev);
 int update_bic_bios(uint8_t slot_id, uint8_t comp, char *image, uint8_t force);
 int update_bic_usb_bios(uint8_t slot_id, uint8_t comp, char *image);
 

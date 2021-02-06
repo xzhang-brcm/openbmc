@@ -16,7 +16,20 @@
 # Boston, MA 02110-1301 USA
 
 board_routes = [
-    # ELBERTTODO 442087 REST API SUPPORT
     "/api/sys/fruid_scm",
     "/api/sys/mb/seutil",
+    "/api/sys/mb/pim2/peutil",
+    "/api/sys/mb/pim3/peutil",
+    "/api/sys/mb/pim4/peutil",
+    "/api/sys/mb/pim5/peutil",
+    "/api/sys/mb/pim6/peutil",
+    "/api/sys/mb/pim7/peutil",
+    "/api/sys/mb/pim8/peutil",
+    "/api/sys/mb/pim9/peutil",
+    "/api/sys/piminfo",
+    "/api/sys/pimserial",
+    "/api/sys/pimstatus",
+    "/api/sys/pim_present",
+    "/api/sys/smbinfo",
+    "/api/sys/firmware_info/all",
 ]

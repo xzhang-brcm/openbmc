@@ -20,10 +20,16 @@
 import json
 from contextlib import suppress
 
+import acl_config
 import common_auth
-from acl_config import RULES
 from aiohttp.log import server_logger
+from aiohttp.web import Request
 from aiohttp.web_exceptions import HTTPException, HTTPForbidden, HTTPInternalServerError
+
+LOCALHOST_ADDRS = {
+    "::1",
+    "127.0.0.1",
+}
 
 
 async def jsonerrorhandler(app, handler):
@@ -50,17 +56,35 @@ async def jsonerrorhandler(app, handler):
 
 async def auth_enforcer(app, handler):
     async def middleware_handler(request):
+        # Assume all requests originating from localhost are privileged
+        if _is_request_from_localhost(request):
+            resp = await handler(request)
+            return resp
+
         acls = []
         with suppress(KeyError):
-            acls = RULES[request.path][request.method]
+            acls = acl_config.RULES[request.path][request.method]
         # We only allow GET endpoints without authorization.
         # Anything else will be forbidden.
         if not acls and request.method != "GET":
+            server_logger.info(
+                "AUTH:Missing acl config for non-get[%s] endpoint %s. Blocking access"
+                % (request.method, request.path)
+            )
             raise HTTPForbidden()
         if acls:
-            await common_auth.auth_required(request)
-            await common_auth.permissions_required(request, acls)
+            identity = common_auth.auth_required(request)  # type: common_auth.Identity
+            common_auth.permissions_required(request, acls)
+            server_logger.info(
+                "AUTH:Authorized %s for [%s]%s"
+                % (identity, request.method, request.path)
+            )
         resp = await handler(request)
         return resp
 
     return middleware_handler
+
+
+def _is_request_from_localhost(request: Request) -> bool:
+    peer_ip = request.transport.get_extra_info("peername")[0]
+    return peer_ip in LOCALHOST_ADDRS

@@ -50,8 +50,8 @@ enum format{
 #endif /* CUSTOM_FRU_LIST */
 
 #ifdef FRU_DEVICE_LIST
-  static const char * pal_dev_list_print_t = pal_dev_list;
-  static const char * pal_dev_list_rw_t =  pal_dev_list;
+  static const char * pal_dev_list_print_t = pal_dev_fru_list;
+  static const char * pal_dev_list_rw_t =  pal_dev_fru_list;
 #else
   static const char * pal_dev_list_print_t = "";
   static const char * pal_dev_list_rw_t = "";
@@ -232,8 +232,8 @@ print_json_fruid_info(fruid_info_t *fruid, const char *name,json_t *fru_array)
 }
 
 /* Populate and print fruid_info by parsing the fru's binary dump */
-void get_fruid_info(uint8_t fru, char *path, char* name, unsigned char print_format,json_t *fru_array) {
-  int ret;
+int get_fruid_info(uint8_t fru, char *path, char* name, unsigned char print_format,json_t *fru_array) {
+  int ret = 0;
   fruid_info_t fruid;
 
   ret = fruid_parse(path, &fruid);
@@ -248,17 +248,21 @@ void get_fruid_info(uint8_t fru, char *path, char* name, unsigned char print_for
     }
   } else {
     if (ret) {
-      fprintf(stderr, "Failed print FRUID for %s\nCheck syslog for errors!\n",name);
+      fprintf(stderr, "Failed print FRUID for %s\nCheck syslog for errors! (err %xh)\n",name, ret);
     } else {
       print_fruid_info(&fruid, name);
       free_fruid_info(&fruid);
     }
   }
+
+  return ret;
 }
 
 static void
 print_usage() {
-  if (pal_dev_list_print_t != NULL || pal_dev_list_rw_t != NULL) {
+  if ((pal_dev_list_print_t != NULL && strlen(pal_dev_list_print_t) != 0) ||
+      (pal_dev_list_rw_t != NULL && strlen(pal_dev_list_rw_t) != 0)) {
+    // dev_list is not empty
     printf("Usage: fruid-util [ %s ] [ %s ] [--json]\n"
       "Usage: fruid-util [ %s ] [ %s ] [--dump | --write ] <file>\n",
       pal_fru_list_print_t, pal_dev_list_print_t, pal_fru_list_rw_t, pal_dev_list_rw_t);
@@ -357,7 +361,7 @@ int check_dump_arg(int argc, char * argv[]) {
     return -1;
   }
   if (argc == 5) {
-    if (pal_dev_list_rw_t == NULL) {
+    if (pal_dev_list_rw_t == NULL || strlen(pal_dev_list_rw_t) == 0) {
       return -1;
     }
     if (strstr(pal_dev_list_rw_t, argv[2]) == NULL) {
@@ -383,7 +387,7 @@ int check_write_arg(int argc, char * argv[])
     return -1;
   }
   if (argc == 5) {
-    if (pal_dev_list_rw_t == NULL) {
+    if (pal_dev_list_rw_t == NULL || strlen(pal_dev_list_rw_t) == 0) {
       return -1;
     }
     if (strstr(pal_dev_list_rw_t, argv[2]) == NULL) {
@@ -413,7 +417,7 @@ int check_modify_arg(int argc, char * argv[])
       return -1;
   }
   if (argc == 7) {
-    if (pal_dev_list_rw_t == NULL) {
+    if (pal_dev_list_rw_t == NULL || strlen(pal_dev_list_rw_t) == 0) {
       return -1;
     }
     if (strstr(pal_dev_list_rw_t, argv[2]) == NULL) {
@@ -441,7 +445,7 @@ int check_print_arg(int argc, char * argv[])
     return -1;
   }
   if (argv[optind+1] != NULL) {
-    if (pal_dev_list_print_t == NULL) {
+    if (pal_dev_list_print_t == NULL || strlen(pal_dev_list_print_t) == 0) {
       return -1;
     }
     if (strstr(pal_dev_list_print_t, argv[optind+1]) == NULL) {
@@ -514,7 +518,7 @@ int print_fru(int fru, char * device, unsigned char print_format, json_t * fru_a
     goto error;
   }
 
-  get_fruid_info(fru, path, name, print_format,fru_array);
+  ret = get_fruid_info(fru, path, name, print_format,fru_array);
 
   if (num_devs && dev_id == DEV_ALL) {
     for (uint8_t i=1;i<=num_devs;i++) {
@@ -527,7 +531,7 @@ int print_fru(int fru, char * device, unsigned char print_format, json_t * fru_a
           printf("%s is unavailable!\n\n", name);
         }
       } else {
-        get_fruid_info(fru, path, name, print_format,fru_array);
+        ret = get_fruid_info(fru, path, name, print_format,fru_array);
       }
     }
   }
@@ -553,17 +557,20 @@ int do_print_fru(int argc, char * argv[], unsigned char print_format)
   ret = check_print_arg(argc, argv);
   if (ret) {
     print_usage();
+    return ret;
   }
 
   ret = pal_get_fru_id(argv[optind], &fru);
   if (ret < 0) {
     print_usage();
+    return ret;
   }
 
   if (fru != FRU_ALL) {
     ret = print_fru(fru, device, print_format,fru_array);
     if (ret < 0) {
       print_usage();
+      return ret;
     }
   } else {
     fru = 1;
@@ -579,7 +586,7 @@ int do_print_fru(int argc, char * argv[], unsigned char print_format)
   }
   json_decref(fru_array);
 
-  return 0;
+  return ret;
 }
 
 int do_action(int argc, char * argv[], unsigned char action_flag) {
@@ -611,6 +618,7 @@ int do_action(int argc, char * argv[], unsigned char action_flag) {
 
   ret = pal_get_fruid_name(fru, name);
   if (ret < 0) {
+    printf("pal_get_fruid_name failed for fru: %d\n", fru);
     return ret;
   }
 
@@ -683,29 +691,34 @@ int do_action(int argc, char * argv[], unsigned char action_flag) {
       // TODO: Add file size check before adding to the eeprom
       if (access(file_path, F_OK) == -1) {
         print_usage();
+        syslog(LOG_ERR, "Unable to access the %s file: %s", file_path, strerror(errno));
+        return -1;
       }
       // Verify the checksum of the new binary
       ret = fruid_parse(file_path, &fruid);
       if(ret != 0) {
+        printf("New FRU data checksum is invalid\n");
         syslog(LOG_CRIT, "New FRU data checksum is invalid");
         return -1;
       }
 
       fd_tmpbin = open(path, O_WRONLY);
       if (fd_tmpbin == -1) {
+        printf("Unable to open the %s file: %s\n", path, strerror(errno));
         syslog(LOG_ERR, "Unable to open the %s file: %s", path, strerror(errno));
         return errno;
       }
 
       fd_newbin = open(file_path, O_RDONLY);
       if (fd_newbin == -1) {
+        printf("Unable to open the %s file: %s\n", file_path, strerror(errno));
         syslog(LOG_ERR, "Unable to open the %s file: %s", file_path, strerror(errno));
         return errno;
       }
 
       fp = fopen(file_path, "rb");
-      if ( NULL == fp )
-      {
+      if ( NULL == fp ) {
+        printf("Unable to get the %s fp %s\n", file_path, strerror(errno));
         syslog(LOG_ERR, "Unable to get the %s fp %s", file_path, strerror(errno));
         return errno;
       }
@@ -734,6 +747,7 @@ int do_action(int argc, char * argv[], unsigned char action_flag) {
         }
 
         if (ret < 0) {
+          printf("FRU:%d Write failed!\n", fru);
           syslog(LOG_WARNING, "[%s] Please check the fruid: %d dev_id: %d file_path: %s", __func__, fru, dev_id, file_path);
           close(fd_newbin);
           close(fd_tmpbin);
@@ -741,6 +755,7 @@ int do_action(int argc, char * argv[], unsigned char action_flag) {
         }
       } else {
         if (access(eeprom_path, F_OK) == -1) {
+          printf("Fail to access eeprom file file : %s for fru %d\n", eeprom_path, fru);
           syslog(LOG_ERR, "cannot access the eeprom file : %s for fru %d",
               eeprom_path, fru);
           close(fd_newbin);
@@ -749,12 +764,14 @@ int do_action(int argc, char * argv[], unsigned char action_flag) {
         }
         sprintf(command, "dd if=%s of=%s bs=%d count=1", file_path, eeprom_path, fru_size);
         if (system(command) != 0) {
+          printf("Copy of %s to %s failed!\n", file_path, eeprom_path);
           syslog(LOG_ERR, "Copy of %s to %s failed!\n", file_path, eeprom_path);
+          return -1;
         }
 
         ret = pal_compare_fru_data(eeprom_path, file_path, fru_size);
-        if (ret < 0)
-        {
+        if (ret < 0) {
+          printf("Compare %s with %s failed!\n", file_path, eeprom_path);
           syslog(LOG_ERR, "[%s] FRU:%d Write Fail", __func__, fru);
           close(fd_newbin);
           close(fd_tmpbin);
@@ -764,8 +781,8 @@ int do_action(int argc, char * argv[], unsigned char action_flag) {
 
       ret = copy_file(fd_tmpbin, fd_newbin, fru_size);
       if (ret < 0) {
-        syslog(LOG_ERR, "copy: write to %s file failed: %s",
-            path, strerror(errno));
+        printf("Write to %s file failed: %s\n", path, strerror(errno));
+        syslog(LOG_ERR, "copy: write to %s file failed: %s", path, strerror(errno));
       }
 
       close(fd_newbin);
@@ -811,8 +828,8 @@ int do_action(int argc, char * argv[], unsigned char action_flag) {
         printf("Fail to modify %s FRU\n", name);
         return ret;
       }
-      get_fruid_info(fru, file_path, name, DEFAULT_FORMAT,NULL);
-      return 0;
+      ret = get_fruid_info(fru, file_path, name, DEFAULT_FORMAT,NULL);
+      return ret;
 
     default:
         return -1;
@@ -826,17 +843,19 @@ int main(int argc, char * argv[]) {
   int c;
   unsigned char print_format = DEFAULT_FORMAT;
   unsigned char action_flag = 0;
+  int ret = 0;
 
   if (!strncmp(pal_fru_list_rw_t, "all, ", strlen("all, "))) {
     pal_fru_list_rw_t = pal_fru_list_rw_t + strlen("all, ");
   }
-  if (pal_dev_list_rw_t != NULL) {
+  if (pal_dev_list_rw_t != NULL && strlen(pal_dev_list_rw_t) != 0) {
     if (!strncmp(pal_dev_list_rw_t, "all, ", strlen("all, "))) {
       pal_dev_list_rw_t = pal_dev_list_rw_t + strlen("all, ");
     }
   }
 
   struct option opts[] = {
+    {"help", 0, NULL, 'h'},
     {"dump", 1, NULL, 'd'},
     {"write", 1, NULL, 'w'},
     {"modify", 0, NULL, 'm'},
@@ -874,6 +893,7 @@ int main(int argc, char * argv[]) {
     {"PCD4", 1, NULL, 'f'},
     {"PCD5", 1, NULL, 'f'},
     {"PCD6", 1, NULL, 'f'},
+    {NULL, 0, NULL, 0},
   };
 
   const char *optstring = "";   //not support short option
@@ -908,6 +928,9 @@ int main(int argc, char * argv[]) {
         printf("unknown option !!!\n\n");
         print_usage();
         break;
+      case 'h':
+        print_usage();
+        break;
       default:
         print_usage();
     }
@@ -917,14 +940,15 @@ int main(int argc, char * argv[]) {
     case FLAG_DUMP:
     case FLAG_WRITE:
     case FLAG_MODIFY:
-      do_action(argc, argv, action_flag);
+      ret = do_action(argc, argv, action_flag);
       break;
     case FLAG_PRINT:
-      do_print_fru(argc, argv, print_format);
+      ret = do_print_fru(argc, argv, print_format);
       break;
     default:
       print_usage();
+      ret = -1;
   }
 
-  return 0;
+  return ret;
 }

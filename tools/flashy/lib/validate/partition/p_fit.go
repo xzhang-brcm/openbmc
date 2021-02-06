@@ -41,11 +41,10 @@ var fitPartitionFactory = func(args PartitionFactoryArgs) Partition {
 	}
 }
 
-/**
- * Parses a device tree / flattened image tree header.
- * Both the beginning and end of the data region are determined from fields in
- * the header. Used for "kernel" and "rootfs" partitions.
- */
+// FitPartition represents a partition using the FIT format.
+// Validation works by parsing a device tree / flattened image tree header.
+// Both the beginning and end of the data region are determined from fields in
+// the header. Used for "kernel" and "rootfs" partitions.
 type FitPartition struct {
 	Name string
 	Data []byte
@@ -72,7 +71,7 @@ func (p *FitPartition) Validate() error {
 		return errors.Errorf("Unable to read FIT: %v", err)
 	}
 
-	// we recognise two nodes, both of which must exist:
+	// we recognize two nodes, both of which must exist:
 	// 'images' and 'configurations'
 	// N.B. some images (e.g. tiogapass1) have three nodes, the third being 'keys';
 	// this is ignored.

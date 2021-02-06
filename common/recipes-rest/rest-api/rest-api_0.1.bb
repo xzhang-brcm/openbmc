@@ -16,6 +16,7 @@
 # Boston, MA 02110-1301 USA
 
 inherit python3unittest
+inherit systemd
 
 SUMMARY = "Rest API Daemon"
 DESCRIPTION = "Daemon to handle RESTful interface."
@@ -24,7 +25,10 @@ PR = "r1"
 LICENSE = "GPLv2"
 LIC_FILES_CHKSUM = "file://${COREBASE}/meta/files/common-licenses/GPL-2.0;md5=801f80980d171dd6425610833a22dbe6"
 DEPENDS_append = " update-rc.d-native aiohttp-native json-log-formatter-native"
-RDEPENDS_${PN} += "python3-core aiohttp json-log-formatter"
+
+REST_API_RDEPENDS = "python3-core aiohttp json-log-formatter"
+RDEPENDS_${PN} += "${REST_API_RDEPENDS}"
+RDEPENDS_${PN}_class-target += "${REST_API_RDEPENDS} libgpio-ctrl"
 
 
 SRC_URI = "file://setup-rest-api.sh \
@@ -37,7 +41,6 @@ SRC_URI = "file://setup-rest-api.sh \
            file://acl_providers/__init__.py\
            file://acl_providers/cached_acl_provider.py\
            file://acl_providers/common_acl_provider_base.py\
-           file://acl_providers/dummy_acl_provider.py\
            file://board_endpoint.py \
            file://rest_watchdog.py \
            file://rest_config.py \
@@ -62,15 +65,21 @@ SRC_URI = "file://setup-rest-api.sh \
            file://rest_ntpstatus.py \
            file://rest_helper.py \
            file://rest_utils.py \
+           file://rest_fscd_sensor_data.py \
            file://board_setup_routes.py \
            file://test_auth_enforcer.py \
            file://test_cached_acl_provider.py \
            file://test_common_middlewares.py \
            file://test_common_logging.py \
            file://test_rest_config.py \
+           file://test_rest_fscd_sensor_data.py \
+           file://test_rest_gpios.py \
+           file://test_common_auth.py \
+           file://test_common_acl_provider_base.py \
            file://boardroutes.py \
            file://common_setup_routes.py \
            file://setup_plat_routes.py \
+           file://restapi.service \
           "
 
 S = "${WORKDIR}"
@@ -109,14 +118,32 @@ binfiles1 = "setup-rest-api.sh \
              rest_utils.py \
              rest_mTerm.py \
              setup_plat_routes.py \
+             rest_fscd_sensor_data.py \
              common_setup_routes.py"
 
 aclfiles = "__init__.py \
             cached_acl_provider.py \
             common_acl_provider_base.py \
-            dummy_acl_provider.py"
+"
 
 pkgdir = "rest-api"
+
+
+install_systemd() {
+    install -d ${D}${systemd_system_unitdir}
+    install -m 0644 ${WORKDIR}/restapi.service ${D}${systemd_system_unitdir}
+}
+
+
+install_sysv() {
+    install -d ${D}${sysconfdir}/sv
+    install -d ${D}${sysconfdir}/sv/restapi
+    install -m 755 ${WORKDIR}/run_rest ${D}${sysconfdir}/sv/restapi/run
+    install -d ${D}${sysconfdir}/init.d
+    install -d ${D}${sysconfdir}/rcS.d
+    install -m 755 ${WORKDIR}/setup-rest-api.sh ${D}${sysconfdir}/init.d/setup-rest-api.sh
+    update-rc.d -r ${D} setup-rest-api.sh start 95 2 3 4 5  .
+}
 
 do_install_class-target() {
   dst="${D}/usr/local/fbpackages/${pkgdir}"
@@ -125,6 +152,7 @@ do_install_class-target() {
   install -d $dst
   install -d $bin
   install -d $acld
+  install -d ${D}${sysconfdir}
   for f in ${binfiles1}; do
     install -m 755 $f ${dst}/$f
     ln -snf ../fbpackages/${pkgdir}/$f ${bin}/$f
@@ -139,14 +167,13 @@ do_install_class-target() {
   for f in ${aclfiles}; do
     install -m 755 ${WORKDIR}/acl_providers/$f ${dst}/acl_providers/$f
   done
-  install -d ${D}${sysconfdir}/sv
-  install -d ${D}${sysconfdir}/sv/restapi
-  install -m 755 ${WORKDIR}/run_rest ${D}${sysconfdir}/sv/restapi/run
-  install -d ${D}${sysconfdir}/init.d
-  install -d ${D}${sysconfdir}/rcS.d
   install -m 644 ${WORKDIR}/rest.cfg ${D}${sysconfdir}/rest.cfg
-  install -m 755 ${WORKDIR}/setup-rest-api.sh ${D}${sysconfdir}/init.d/setup-rest-api.sh
-  update-rc.d -r ${D} setup-rest-api.sh start 95 2 3 4 5  .
+
+  if ${@bb.utils.contains('DISTRO_FEATURES', 'systemd', 'true', 'false', d)}; then
+      install_systemd
+  else
+      install_sysv
+  fi
 }
 
 
@@ -154,3 +181,5 @@ FBPACKAGEDIR = "${prefix}/local/fbpackages"
 
 FILES_${PN} = "${FBPACKAGEDIR}/rest-api ${prefix}/local/bin ${sysconfdir} "
 BBCLASSEXTEND += "native nativesdk"
+
+SYSTEMD_SERVICE_${PN} = "restapi.service"

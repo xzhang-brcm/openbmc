@@ -13,6 +13,8 @@ FLASH_FIT_OFFSET_KB = "1024"
 
 inherit kernel_fitimage
 
+require recipes-core/images/fbobmc-image-meta.inc
+require fuji-image-layout.inc
 require recipes-core/images/fb-openbmc-image.bb
 
 # Include modules in rootfs
@@ -28,8 +30,12 @@ IMAGE_INSTALL += " \
   bic-util \
   bitbang \
   cpldupdate \
+  cpldupdate-i2c \
   libcpldupdate-dll-gpio \
+  libcpldupdate-dll-ast-jtag \
+  fio \
   flashrom \
+  front-paneld \
   fw-util \
   bic-monitor \
   openbmc-utils \
@@ -47,6 +53,7 @@ IMAGE_INSTALL += " \
   libpsu \
   psu-util \
   mdio-util \
+  usb-fpga-util \
   "
 
 def tpm_tools_recipe(d):

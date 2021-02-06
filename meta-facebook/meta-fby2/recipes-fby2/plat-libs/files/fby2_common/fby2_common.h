@@ -64,6 +64,7 @@ enum {
   TYPE_SPB_YV2     = 0,
   TYPE_SPB_YV250   = 1,
   TYPE_SPB_YV2ND   = 2,
+  TYPE_SPB_YV2ND2  = 3,
 };
 
 enum {
@@ -150,7 +151,6 @@ typedef struct {
 #define GPIO_POSTCODE_2                   "POSTCODE_2"
 #define GPIO_POSTCODE_3                   "POSTCODE_3"
 #define GPIO_DUAL_FAN_DETECT              "DUAL_FAN_DETECT"
-#define GPIO_YV250_USB_OCP_UART_SWITCH_N  "YV250_USB_OCP_UART_SWITCH_N" // YV2.50
 #define GPIO_FAN_LATCH_DETECT             "FAN_LATCH_DETECT"
 #define GPIO_SLOT1_POWER_EN               "SLOT1_POWER_EN"
 #define GPIO_SLOT2_POWER_EN               "SLOT2_POWER_EN"
@@ -192,6 +192,7 @@ typedef struct {
 #define GPIO_BOARD_REV_ID1                "BOARD_REV_ID1"
 #define GPIO_BOARD_REV_ID2                "BOARD_REV_ID2"
 #define GPIO_BOARD_ID                     "BOARD_ID"
+#define GPIO_BASEBOARD_ID                 "BASEBOARD_ID"
 #define GPIO_SLOT1_PRSNT_B_N              "SLOT1_PRSNT_B_N"
 #define GPIO_SLOT2_PRSNT_B_N              "SLOT2_PRSNT_B_N"
 #define GPIO_SLOT3_PRSNT_B_N              "SLOT3_PRSNT_B_N"
@@ -219,6 +220,11 @@ typedef struct {
 
 #define BIC_CACHED_PID "/var/run/bic-cached_%d.lock"
 
+#define SPB_REV_FILE "/tmp/spb_rev"
+#define SPB_TYPE_FILE "/tmp/spb_type"
+#define FAN_TYPE_FILE "/tmp/fan_type"
+#define SPB_BOARD_ID_FILE "/tmp/spb_board_id"
+
 int fby2_common_fru_name(uint8_t fru, char *str);
 int fby2_common_fru_id(char *str, uint8_t *fru);
 int fby2_common_dev_id(char *str, uint8_t *dev);
@@ -232,6 +238,10 @@ int fby2_common_get_fan_type(void);
 int fby2_common_get_fan_config(void);
 int fby2_common_set_gpio_val(char *shadow, int val);
 int fby2_common_get_gpio_val(char *shadow, int *val);
+int fby2_common_get_spb_rev(void);
+int fby2_common_get_board_id(void);
+int fby2_common_get_baseboard_id(void);
+int fby2_common_get_gpio_from_cache(char *shadow, int *val);
 #ifdef __cplusplus
 } // extern "C"
 #endif

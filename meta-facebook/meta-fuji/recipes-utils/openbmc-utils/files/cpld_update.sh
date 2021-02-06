@@ -26,18 +26,22 @@ CPLD_TYPE="$2"
 UPDATE_IMG="$4"
 
 DLL_PATH=/usr/lib/libcpldupdate_dll_gpio.so
+DLL_AST_JTAG_PATH=/usr/lib/libcpldupdate_dll_ast_jtag.so
 
 usage() {
-    echo "Usage: $prog -s <CPLD_TYPE> -f <img_file> <hw|sw>"
+    echo "Usage: $prog -s <CPLD_TYPE> -f <img_file> <hw|sw|i2c>"
     echo
-    echo "CPLD_TYPE: ( FCM-T | FCM-B | SCM | SMB | PDB-L | PDB-R)"
+    echo "CPLD_TYPE: ( FCM-T | FCM-B | SCM | SMB | PWR-L | PWR-R | PFR)"
     echo
     echo "img_file: Image file for lattice CPLD"
     echo "  VME file for software mode"
     echo "  JED file for hardware mode"
+    echo "  JBC file for Intel PFR FPGA update"
+    echo "  HEX file for i2c mode"
     echo "options:"
     echo "  hw: Program the CPLD using JTAG hardware mode"
     echo "  sw: Program the CPLD using JTAG software mode"
+    echo "  i2c: Program the CPLD using hardware IP core mode"
     echo
     echo
 }
@@ -56,6 +60,17 @@ enable_fct-t_jtag_chain(){
     gpio_set_value SYS_CPLD_JTAG_EN_N     1
     gpio_set_value BMC_SCM_CPLD_JTAG_EN_N 1
     gpio_set_value BMC_FPGA_JTAG_EN       1
+}
+
+enable_pfr_jtag_chain(){
+    gpio_set_value BMC_JTAG_MUX_IN        1
+    gpio_set_value FCM_1_CPLD_JTAG_EN_N   1
+    gpio_set_value BMC_FCM_1_SEL          1
+    gpio_set_value FCM_2_CPLD_JTAG_EN_N   1
+    gpio_set_value BMC_FCM_2_SEL          1
+    gpio_set_value SYS_CPLD_JTAG_EN_N     1
+    gpio_set_value BMC_SCM_CPLD_JTAG_EN_N 1
+    gpio_set_value BMC_FPGA_JTAG_EN       0
 }
 
 enable_fct-b_jtag_chain(){
@@ -123,9 +138,7 @@ disable_jtag_chain(){
     gpio_set_value BMC_FCM_2_SEL          1
     gpio_set_value SYS_CPLD_JTAG_EN_N     1
     gpio_set_value BMC_SCM_CPLD_JTAG_EN_N 1
-    gpio_set_value JTAG_TDI         1
-    gpio_set_value JTAG_TCK         0
-    gpio_set_value JTAG_TMS         1
+    gpio_set_value BMC_FPGA_JTAG_EN       1
     gpio_set_value PDB_L_HITLESS    1
     gpio_set_value PDB_R_HITLESS    1
 }
@@ -139,13 +152,15 @@ if [ -e "$UPDATE_IMG" ];then
         enable_fct-t_jtag_chain
     elif [[  $CPLD_TYPE == "FCM-B" ]];then
         enable_fct-b_jtag_chain
+    elif [[  $CPLD_TYPE == "PFR" ]];then
+        enable_pfr_jtag_chain
     elif [[  $CPLD_TYPE == "SMB" ]];then
         enable_smb_jtag_chain
     elif [[  $CPLD_TYPE == "SCM" ]];then
         enable_scm_jtag_chain
-    elif [[  $CPLD_TYPE == "PDB-L" ]];then
+    elif [[  $CPLD_TYPE == "PWR-L" ]];then
         enable_pdb-l_jtag_chain
-    elif [[  $CPLD_TYPE == "PDB-R" ]];then
+    elif [[  $CPLD_TYPE == "PWR-R" ]];then
         enable_pdb-r_jtag_chain
     else
         echo 'argument '"$CPLD_TYPE"' is wrong'
@@ -156,17 +171,35 @@ else
     exit 1
 fi
 
+expect=0
 case $5 in
     hw)
         cpldprog -p "${UPDATE_IMG}"
         ;;
     sw)
-        if [[  $CPLD_TYPE == "PDB-L" ]];then
+        if [[  $CPLD_TYPE == "PWR-L" ]];then
+            # ispvm success return code is 1
+            expect=1
             ispvm -f 100 dll $DLL_PATH "${UPDATE_IMG}" --tdo PDB_L_JTAG_TDO --tdi PDB_L_JTAG_TDI --tms PDB_L_JTAG_TMS --tck PDB_L_JTAG_TCK
-        elif [[  $CPLD_TYPE == "PDB-R" ]];then
+        elif [[  $CPLD_TYPE == "PWR-R" ]];then
+            # ispvm success return code is 1
+            expect=1
             ispvm -f 100 dll $DLL_PATH "${UPDATE_IMG}" --tdo PDB_R_JTAG_TDO --tdi PDB_R_JTAG_TDI --tms PDB_R_JTAG_TMS --tck PDB_R_JTAG_TCK
+        elif [[  $CPLD_TYPE == "PFR" ]];then
+            jbi -aPROGRAM -ddo_real_time_isp=1 -W "${UPDATE_IMG}"
         else
-            ispvm -f 1000 dll $DLL_PATH "${UPDATE_IMG}" --tdo JTAG_TDO --tdi JTAG_TDI --tms JTAG_TMS --tck JTAG_TCK
+            # ispvm success return code is 1
+            expect=1
+            ispvm -f 100 dll $DLL_AST_JTAG_PATH "${UPDATE_IMG}"
+        fi
+        ;;
+    i2c)
+        if [[  $CPLD_TYPE == "PWR-L" ]];then
+                cpldupdate-i2c 53 0x40 "${UPDATE_IMG}"
+        elif [[  $CPLD_TYPE == "PWR-R" ]];then
+                cpldupdate-i2c 61 0x40 "${UPDATE_IMG}"
+        else
+            echo "Only Power CPLD support I2C Mode !!!"
         fi
         ;;
     *)
@@ -176,12 +209,6 @@ case $5 in
 esac
 
 result=$?
-
-if [ "$5" = "sw" ]; then
-    expect=1
-else
-    expect=0
-fi
 
 disable_jtag_chain
 

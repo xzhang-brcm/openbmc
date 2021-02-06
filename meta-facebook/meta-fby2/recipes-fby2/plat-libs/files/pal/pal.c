@@ -86,6 +86,7 @@
 #define DELAY_12V_CYCLE 20
 #endif
 
+#define LARGEST_FILEPATH_LEN 256
 #define LARGEST_DEVICE_NAME 120
 #define PWM_DIR "/sys/devices/platform/ast_pwm_tacho.0"
 
@@ -124,7 +125,6 @@
   #define GMAC0_DIR "/sys/devices/platform/ftgmac100.0/net/eth0"
 #endif
 
-#define SPB_REV_FILE "/tmp/spb_rev"
 #define SPB_REV_PVT 3
 
 #define IMC_VER_SIZE 8
@@ -161,6 +161,14 @@
 #define NCSI_MIN_DATA_PAYLOAD 36
 #define NCSI_RETRY_MAX        2
 #define BRCM_POWERUP_PRE_CMD  0x1A
+
+#define log_system(cmd)                                                     \
+do {                                                                        \
+  int sysret = system(cmd);                                                 \
+  if (sysret)                                                               \
+    syslog(LOG_WARNING, "%s: system command failed, cmd: \"%s\",  ret: %d", \
+            __func__, cmd, sysret);                                         \
+} while(0)
 
 #if defined CONFIG_FBY2_ND
 /* MCA bank data format */
@@ -243,6 +251,10 @@ typedef struct {
 #define max(a, b) ((a) > (b)) ? (a) : (b)
 #endif
 
+#define NUM_SERVER_FRU  4
+#define NUM_NIC_FRU     1
+#define NUM_BMC_FRU     1
+
 
 static int nic_powerup_prep(uint8_t slot_id, uint8_t reinit_type);
 
@@ -259,11 +271,19 @@ static char* gpio_slot_latch[] = { 0, "SLOT1_EJECTOR_LATCH_DETECT_N", "SLOT2_EJE
 
 const char pal_fru_list[] = "all, slot1, slot2, slot3, slot4, spb, nic";
 const char pal_server_list[] = "slot1, slot2, slot3, slot4";
+const char *pal_server_fru_list[NUM_SERVER_FRU] = {"slot1", "slot2", "slot3", "slot4"};
+const char *pal_nic_fru_list[NUM_NIC_FRU] = {"nic"};
+const char *pal_bmc_fru_list[NUM_BMC_FRU] = {"spb"};
 
 #ifdef CONFIG_FBY2_GPV2
-const char pal_dev_list[] = "all, device0, device1, device2, device3, device4, device5, device6, device7, device8, device9, device10, device11";
+const char pal_dev_fru_list[] = "all, device0, device1, device2, device3, device4, device5, device6, device7, device8, device9, device10, device11";
+const char pal_dev_pwr_list[] = "all, device0, device1, device2, device3, device4, device5, device6, device7, device8, device9, device10, device11";
 const char pal_dev_pwr_option_list[] = "status, off, on, cycle";
 #endif
+
+size_t server_fru_cnt = NUM_SERVER_FRU;
+size_t nic_fru_cnt  = NUM_NIC_FRU;
+size_t bmc_fru_cnt  = NUM_BMC_FRU;
 
 size_t pal_pwm_cnt = 2;
 size_t pal_tach_cnt = 2;
@@ -717,14 +737,14 @@ power_value_adjust(const struct power_coeff *table, float *value) {
   return;
 }
 
-// SP_BMC_HSC_PIN = SP_HSC_IN_POWER - (slot1 GPv2 INA230 Pwr + slot2 INA230 Power + slot3 GPv2 INA230 Pwr + slot4 INA230 Power) 
+// SP_BMC_HSC_PIN = SP_HSC_IN_POWER - (slot1 GPv2 INA230 Pwr + slot2 INA230 Power + slot3 GPv2 INA230 Pwr + slot4 INA230 Power)
 static int
 calc_bmc_hsc_value(float *value) {
   uint8_t ret = 0;
   float bmc_hsc_val = 0, val = 0;
   uint8_t status = 0;
   uint8_t i = 0;
-  uint8_t hsc_snr_list[4] = {GPV2_SENSOR_INA230_POWER, BIC_SENSOR_INA230_POWER, 
+  uint8_t hsc_snr_list[4] = {GPV2_SENSOR_INA230_POWER, BIC_SENSOR_INA230_POWER,
                              GPV2_SENSOR_INA230_POWER, BIC_SENSOR_INA230_POWER}; // power sensor for 4 slots
 
   ret = pal_sensor_read_raw(FRU_SPB, SP_SENSOR_HSC_IN_POWERAVG, &val);
@@ -806,8 +826,6 @@ static inlet_corr_t g_ict_gpv2_15k[] = {
 static uint8_t g_ict_gpv2_10k_count = sizeof(g_ict_gpv2_10k)/sizeof(inlet_corr_t);
 static uint8_t g_ict_gpv2_15k_count = sizeof(g_ict_gpv2_15k)/sizeof(inlet_corr_t);
 
-int pal_check_board_type(uint8_t *status);
-
 static void apply_inlet_correction(float *value) {
   static float dt = 0;
   uint8_t pwm[2] = {0};
@@ -824,9 +842,9 @@ static void apply_inlet_correction(float *value) {
   pwm[0] = (pwm[0] + pwm[1]) / 2;
 
   if ((fby2_get_slot_type(FRU_SLOT1) != SLOT_TYPE_GPV2) || (fby2_get_slot_type(FRU_SLOT3) != SLOT_TYPE_GPV2)) {
-    uint8_t is_nd_board = 0;
-    pal_check_board_type(&is_nd_board);
-    if(is_nd_board == 1) {
+    int spb_type = 0;
+    spb_type = fby2_common_get_spb_type();
+    if(spb_type == TYPE_SPB_YV2ND || spb_type == TYPE_SPB_YV2ND2) {
       ict = g_ict_nd;
       ict_cnt = g_ict_nd_count;
     } else {
@@ -1174,7 +1192,7 @@ pal_set_rst_btn(uint8_t slot, uint8_t status) {
   }
 
   ret = fby2_common_set_gpio_val(gpio_rst_btn[slot], val);
-  
+
   return ret;
 }
 
@@ -1373,7 +1391,7 @@ power_on_server_physically(uint8_t slot_id){
     syslog(LOG_WARNING, "%s: Power on is failed for slot%d\n",__func__,slot_id);
     return -1;
   }
-  
+
 
   error:
   gpio_close(gdesc);
@@ -1429,9 +1447,9 @@ nic_powerup_prep(uint8_t slot_id, uint8_t reinit_type) {
     msg->msg_payload[4] = 0x00; // OEM Playload Version
     msg->msg_payload[5] = BRCM_POWERUP_PRE_CMD ; // OEM Command Type
     msg->msg_payload[6] = 0x00; // 6~7: OEM Payload Length
-    msg->msg_payload[7] = oem_payload_length; 
+    msg->msg_payload[7] = oem_payload_length;
     msg->msg_payload[8] = 0x00; // 8~12: Reserved
-    msg->msg_payload[9] = 0x00; 
+    msg->msg_payload[9] = 0x00;
     msg->msg_payload[10] = 0x00;
     msg->msg_payload[11] = 0x00;
     msg->msg_payload[12] = 0x00;
@@ -1450,7 +1468,7 @@ nic_powerup_prep(uint8_t slot_id, uint8_t reinit_type) {
 
     if (cc != RESP_COMMAND_COMPLETED) {
       printf("Power-up prepare command failed!\n");
-      ret = -1;      
+      ret = -1;
       print_ncsi_completion_codes(rsp);
     } else {
       syslog(LOG_INFO, "Power-up perpare is done");
@@ -1573,18 +1591,6 @@ error:
   return ret;
 }
 
-static uint8_t
-_get_spb_rev(void) {
-  int rev;
-
-  if (read_device(SPB_REV_FILE, &rev)) {
-    printf("Get spb revision failed\n");
-    return -1;
-  }
-
-  return rev;
-}
-
 static bool
 pal_is_device_pair(uint8_t slot_id) {
   int pair_set_type;
@@ -1602,27 +1608,25 @@ pal_is_device_pair(uint8_t slot_id) {
 
 int
 pal_baseboard_clock_control(uint8_t slot_id, int ctrl) {
-  uint8_t rev;
   int spb_type;
   int ret = 0;
   gpio_desc_t *v1gdesc = NULL, *v2gdesc = NULL, *v3gdesc = NULL;
 
   spb_type = fby2_common_get_spb_type();
-  rev = _get_spb_rev();
   switch(slot_id) {
     case FRU_SLOT1:
     case FRU_SLOT2:
-      if (rev < SPB_REV_PVT && spb_type != TYPE_SPB_YV250) {
-        v1gdesc = gpio_open_by_shadow("PE_BUFF_OE_0_R_N");
-        v2gdesc = gpio_open_by_shadow("PE_BUFF_OE_1_R_N");
+      if (spb_type != TYPE_SPB_YV250) {
+        v1gdesc = gpio_open_by_shadow("PE_BUFF_OE_0_N");
+        v2gdesc = gpio_open_by_shadow("PE_BUFF_OE_1_N");
       }
       v3gdesc = gpio_open_by_shadow("CLK_BUFF1_PWR_EN_N");
       break;
     case FRU_SLOT3:
     case FRU_SLOT4:
-      if (rev < SPB_REV_PVT && spb_type != TYPE_SPB_YV250) {
-        v1gdesc = gpio_open_by_shadow("PE_BUFF_OE_2_R_N");
-        v2gdesc = gpio_open_by_shadow("PE_BUFF_OE_3_R_N");
+      if (spb_type != TYPE_SPB_YV250) {
+        v1gdesc = gpio_open_by_shadow("PE_BUFF_OE_2_N");
+        v2gdesc = gpio_open_by_shadow("PE_BUFF_OE_3_N");
       }
       v3gdesc = gpio_open_by_shadow("CLK_BUFF2_PWR_EN_N");
       break;
@@ -1637,7 +1641,7 @@ pal_baseboard_clock_control(uint8_t slot_id, int ctrl) {
     }
   }
 
-  if (rev < SPB_REV_PVT && spb_type != TYPE_SPB_YV250) {
+  if (spb_type != TYPE_SPB_YV250) {
     if (gpio_set_value(v1gdesc, ctrl) || gpio_set_value(v2gdesc, ctrl)) {
       ret = -1;
     }
@@ -1927,7 +1931,7 @@ pal_slot_pair_12V_on(uint8_t slot_id) {
        if (access(vpath, F_OK) == 0) {
          unlink(vpath);
          sprintf(vpath, "%s slot%u start", HOTSERVICE_SCRPIT, pair_slot_id);
-         system(vpath);
+         log_system(vpath);
        }
 
        // Check BIC Self Test Result
@@ -2048,7 +2052,7 @@ pal_hot_service_action(uint8_t slot_id) {
     sleep(2);
 
     sprintf(cmd, "/usr/local/bin/check_slot_type.sh slot%u", slot_id);
-    system(cmd);
+    log_system(cmd);
 
     unlink(hspath);
     block_12v = (pal_is_device_pair(slot_id) && pal_is_hsvc_ongoing(pair_slot_id));
@@ -2057,7 +2061,7 @@ pal_hot_service_action(uint8_t slot_id) {
     } else {
       sprintf(cmd, "touch "HOTSERVICE_BLOCK, slot_id);
     }
-    system(cmd);
+    log_system(cmd);
 
     if (0 != pal_fruid_init(slot_id)) {
       syslog(LOG_ERR, "%s: pal_fruid_init failed", __func__);
@@ -2354,7 +2358,7 @@ server_12v_on(uint8_t slot_id) {
   if (pal_is_slot_support_update(slot_id)) {
     char vpath[128];
     snprintf(vpath, sizeof(vpath), "/usr/local/bin/bic-cached -f %d &", slot_id);  // retrieve FRU data
-    system(vpath);
+    log_system(vpath);
   }
 
   if (pal_is_device_pair(slot_id)) {
@@ -2379,7 +2383,7 @@ server_12v_on(uint8_t slot_id) {
     if (pal_is_slot_support_update(pair_slot_id)) {
       char vpath[128];
       snprintf(vpath, sizeof(vpath), "/usr/local/bin/bic-cached -f %d &", pair_slot_id);  // retrieve FRU data
-      system(vpath);
+      log_system(vpath);
     }
   }
 
@@ -2660,7 +2664,7 @@ pal_is_slot_latch_closed(uint8_t slot_id, uint8_t *status) {
     case FRU_SLOT4:
       if (fby2_common_get_gpio_val(gpio_slot_latch[slot_id], &val_latch) != 0) {
         return -1;
-      }     
+      }
 
       if (val_latch == GPIO_VALUE_LOW) {
         *status = 1;
@@ -2778,7 +2782,7 @@ pal_is_slot_support_update(uint8_t fru)
 
 int
 pal_is_debug_card_prsnt(uint8_t *status) {
-  gpio_value_t val;  
+  gpio_value_t val;
 
   if (fby2_common_get_gpio_val("FM_POST_CARD_PRES_BMC_N", &val) != 0) {
     return -1;
@@ -3377,11 +3381,11 @@ int
 pal_sled_cycle(void) {
 #if !defined(CONFIG_FBY2_KERNEL)
   // Remove the adm1275 module as the HSC device is busy
-  system("rmmod adm1275");
+  log_system("rmmod adm1275");
 #endif
 
   // Send command to HSC power cycle
-  system("i2cset -y 10 0x40 0xd9 c");
+  log_system("i2cset -y 10 0x40 0xd9 c");
 
   return 0;
 }
@@ -3533,10 +3537,10 @@ pal_set_led(uint8_t slot, uint8_t status) {
   } else {
     val = GPIO_VALUE_LOW;
   }
-  
+
   if (fby2_common_set_gpio_val(gpio_led[slot], val) != 0) {
     return -1;
-  }  
+  }
 
   return 0;
 }
@@ -3949,6 +3953,58 @@ pal_get_fru_list(char *list) {
 }
 
 int
+pal_get_dev_list(uint8_t fru, char *list)
+{
+#ifdef CONFIG_FBY2_GPV2
+  if (fru >= FRU_SLOT1 && fru <= FRU_SLOT4) {
+    strcpy(list, pal_dev_fru_list);
+    return 0;
+  }
+  return -1;
+#else
+  return PAL_ENOTSUP;
+#endif
+}
+
+int
+pal_get_fru_capabilities(uint8_t fru, unsigned int *caps)
+{
+  int ret = 0;
+  switch (fru) {
+    case FRU_SLOT1:
+    case FRU_SLOT2:
+    case FRU_SLOT3:
+    case FRU_SLOT4:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL |
+        FRU_CAPABILITY_SERVER | FRU_CAPABILITY_POWER_ALL |
+        FRU_CAPABILITY_POWER_12V_ALL | FRU_CAPABILITY_HAS_DEVICE;
+      break;
+    case FRU_SPB:
+    case FRU_BMC:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL | FRU_CAPABILITY_MANAGEMENT_CONTROLLER;
+      break;
+    case FRU_NIC:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL | FRU_CAPABILITY_NETWORK_CARD;
+      break;
+    default:
+      ret = -1;
+      break;
+  }
+  return ret;
+}
+
+int
+pal_get_dev_capabilities(uint8_t fru, uint8_t dev, unsigned int *caps)
+{
+  if (fru < FRU_SLOT1 || fru > FRU_SLOT4) {
+    return -1;
+  }
+  *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL |
+    (FRU_CAPABILITY_POWER_ALL & (~FRU_CAPABILITY_POWER_RESET));
+  return 0;
+}
+
+int
 pal_get_fru_id(char *str, uint8_t *fru) {
 
   return fby2_common_fru_id(str, fru);
@@ -3969,11 +4025,12 @@ pal_get_fru_name(uint8_t fru, char *name) {
 int
 pal_get_dev_name(uint8_t fru, uint8_t dev, char *name)
 {
-  int ret = fby2_get_fruid_name(fru, name);
+  char tmp_name[64] = {0};
+  int ret = fby2_get_fruid_name(fru, tmp_name);
   if (ret < 0)
     return ret;
 
-  sprintf(name, "%s Device %u", name, dev-1);
+  sprintf(name, "%s Device %u", tmp_name, dev-1);
   return 0;
 }
 
@@ -4137,6 +4194,7 @@ pal_read_nic_fruid(const char *path, int size) {
     if (ret) {
       break;
     }
+    msleep(10);
 
     count = write(fd, rbuf, 8);
     if (count != 8) {
@@ -4203,6 +4261,7 @@ _write_nic_fruid(const char *path) {
     if (ret) {
       break;
     }
+    msleep(10);
 
     offset += count;
   }
@@ -4221,10 +4280,82 @@ error_exit:
 
 int
 pal_fruid_write(uint8_t fru, char *path) {
-  if (fru == FRU_NIC) {
-    return _write_nic_fruid(path);
+  int ret, retry = 3;
+  int fru_size = FRUID_SIZE, new_fru_size = FRUID_SIZE;
+  char fruid_path[64] = {0};
+  FILE *fp;
+
+  fp = fopen(path, "rb");
+  if ( NULL == fp ) {
+    syslog(LOG_ERR, "Unable to get the %s fp %s", path, strerror(errno));
+    return errno;
   }
-  return bic_write_fruid(fru, 0, path);
+
+  // get the size of the new binary
+  fseek(fp, 0L, SEEK_END);
+  new_fru_size = ftell(fp);
+  rewind(fp);
+  fclose(fp);
+  syslog(LOG_WARNING, "pal_fruid_write: Write slot%d len=%d", fru, new_fru_size);
+
+  sprintf(fruid_path, "/tmp/tmp_fruid_slot%d.bin", fru);
+  if (fru == FRU_NIC) {
+    while ((--retry) >= 0) {
+      ret = _write_nic_fruid(path); // write from file path
+      if (ret) {
+        syslog(LOG_WARNING, "pal_fruid_write: Write NIC fail");
+        continue;
+      }
+
+      ret = pal_read_nic_fruid(fruid_path, new_fru_size); // write to fru path
+      if (ret) {
+        syslog(LOG_WARNING, "pal_fruid_write: Read NIC fail");
+        continue;
+      }
+
+      ret = pal_compare_fru_data(fruid_path,path,new_fru_size);  // compare frus
+      if (ret) {
+        syslog(LOG_WARNING, "pal_fruid_write: Compare NIC fail");
+        continue;
+      }
+      if (!ret)
+        break;
+
+      if (retry)
+        msleep(10);
+    }
+    remove(fruid_path);
+    return ret;
+  }
+  while ((--retry) >= 0) {
+    ret = bic_write_fruid(fru, 0, path);
+    if (ret) {
+      syslog(LOG_WARNING, "pal_fruid_write: Write slot%d fail", fru);
+      continue;
+    }
+
+    ret = bic_read_fruid(fru, 0, fruid_path, &fru_size);
+    if (ret) {
+      syslog(LOG_WARNING, "pal_fruid_write: Read slot%d fail", fru);
+      continue;
+    }
+
+    // select minimum size of 2 files for comparing frus
+    new_fru_size = (new_fru_size < fru_size)? new_fru_size :fru_size;
+
+    ret = pal_compare_fru_data(fruid_path,path,new_fru_size);  // compare frus
+    if (ret) {
+      syslog(LOG_WARNING, "pal_fruid_write: Compare slot%d fail", fru);
+      continue;
+    }
+    if (!ret)
+      break;
+
+    if (retry)
+      msleep(10);
+  }
+  remove(fruid_path);
+  return ret;
 }
 
 int
@@ -4293,26 +4424,6 @@ pal_sensor_is_source_host(uint8_t fru, uint8_t sensor_id)
       break;
   }
   return false;
-}
-
-int
-pal_check_board_type(uint8_t *status) {
-  gpio_value_t val_board_id, val_rev_id2;
-
-  if (fby2_common_get_gpio_val("BOARD_ID", &val_board_id) != 0) {
-    return -1;
-  }
-
-  if (fby2_common_get_gpio_val("BOARD_REV_ID2", &val_rev_id2) != 0) {
-    return -1;
-  }
-
-  if ((1 == val_board_id) && (0 == val_rev_id2))
-    *status = 1;
-  else
-    *status = 0;
-
-  return 0;
 }
 
 int
@@ -4389,17 +4500,17 @@ pal_sensor_read_raw(uint8_t fru, uint8_t sensor_num, void *value) {
   else {
     // On successful sensor read
     if (fru == FRU_SPB) {
-      uint8_t is_nd_board = 0;
-      pal_check_board_type(&is_nd_board);
+      int spb_type = 0;
+      spb_type = fby2_common_get_spb_type();
       if (sensor_num == SP_SENSOR_HSC_OUT_CURR || sensor_num == SP_SENSOR_HSC_PEAK_IOUT) {
-        if (is_nd_board == 1) {
+        if (spb_type == TYPE_SPB_YV2ND || spb_type == TYPE_SPB_YV2ND2) {
           power_value_adjust(nd_curr_cali_table, (float *)value);
         } else {
           power_value_adjust(curr_cali_table, (float *)value);
         }
       }
       if (sensor_num == SP_SENSOR_HSC_IN_POWER || sensor_num == SP_SENSOR_HSC_PEAK_PIN || sensor_num == SP_SENSOR_HSC_IN_POWERAVG) {
-        if (is_nd_board == 1) {
+        if (spb_type == TYPE_SPB_YV2ND || spb_type == TYPE_SPB_YV2ND) {
           power_value_adjust(nd_pwr_cali_table, (float *)value);
         } else {
           power_value_adjust(pwr_cali_table, (float *)value);
@@ -4501,7 +4612,7 @@ pal_sensor_read_raw(uint8_t fru, uint8_t sensor_num, void *value) {
           } else {
             // POST is not ongoing
             if (check_flag == POST_END_CHECK) {
-              if (post_end_counter > 0) {
+              if (post_end_counter > 0) { // handle fscd ready after post end
                 // check counter change
                 current_counter = pal_get_fscd_counter();
                 if (last_counter != current_counter) {
@@ -4519,7 +4630,17 @@ pal_sensor_read_raw(uint8_t fru, uint8_t sensor_num, void *value) {
                   // fscd watchdog counter update
                   pal_check_fscd_watchdog();
                 }
-              } else if (post_end_counter < 0) {
+              } else if (post_end_counter == POST_END_COUNTER_IGNORE_LOG) { // handle initial case after post end
+                // If POST is not ongoing at the beginning, keep ignore_thresh at initial case
+                // fix sensor-util force read alter fan UNC/UCR block event
+                syslog(LOG_WARNING,"fscd handle initial case after post end");
+                if (pal_get_ignore_thresh(&ignore_thresh)) {
+                  // If sensord hasn't create ignore_thresh for fan UNC/UCR block event
+                  // block fan UNC/UCR for 4 fscd cycle
+                  pal_check_fscd_watchdog();
+                }
+                post_end_counter = POST_END_COUNTER_SHOW_LOG; // end of initial case after post end
+              } else if (post_end_counter < 0) { // handle fscd not ready after post end
                 // fscd not start yet or fscd hangs up at the first run
                 pal_check_fscd_watchdog();
               }
@@ -5243,10 +5364,11 @@ int
 pal_is_bmc_por(void) {
   FILE *fp;
   int por = 0;
-
-  fp = fopen("/tmp/ast_por", "r");
+  const char fpath[] = "/tmp/ast_por";
+  fp = fopen(fpath, "r");
   if (fp != NULL) {
-    fscanf(fp, "%d", &por);
+    if(fscanf(fp, "%d", &por) != 1)
+      syslog(LOG_WARNING, "%s: read file failed, file: %s", __func__, fpath);
     fclose(fp);
   }
 
@@ -5572,7 +5694,7 @@ pal_store_crashdump(uint8_t fru, bool ierr) {
 
   memset(cmd, 0, sizeof(cmd));
   sprintf(cmd, "sys_runtime=$(awk '{print $1}' /proc/uptime) ; sys_runtime=$(printf \"%%0.f\" $sys_runtime) ; echo $((sys_runtime+1200)) > /tmp/cache_store/fru%d_crashdump", fru);
-  system(cmd);
+  log_system(cmd);
 
   return fby2_common_crashdump(fru, ierr, false);
 }
@@ -7361,6 +7483,7 @@ pal_is_nvme_ready() {
   uint8_t setup = 0;
   uint8_t sdr_update = 0;
   char cmd[128] = {0};
+  int ret = 0;
 
   for (uint8_t fru=1;fru <= 4;fru+=2) {
     // get nvme ready from kv_store
@@ -7380,6 +7503,7 @@ pal_is_nvme_ready() {
       // fan config update after bios get device type
       pal_get_dev_config_setup(&setup);
       if (!setup && (type!= DEV_TYPE_UNKNOWN)) { // once a device is recognized via NVMe
+        ret = 0;
         syslog(LOG_WARNING, "pal_is_nvme_ready: device config change (slot%u type=%u)",fru ,type);
         if (type != DEV_TYPE_VSI_ACC && type != DEV_TYPE_BRCM_ACC) {
           type = DEV_TYPE_SSD;
@@ -7389,11 +7513,12 @@ pal_is_nvme_ready() {
           syslog(LOG_WARNING, "pal_is_nvme_ready: fan config change from type %u to type %u",fan_type ,type);
           memset(cmd, 0, sizeof(cmd));
           sprintf(cmd, "sv stop fscd ;/etc/init.d/setup-fan.sh %d;",type);
-          system(cmd);
+          ret = system(cmd);
         } else {
           syslog(LOG_WARNING, "pal_is_nvme_ready: fan config deoesn't change (type=%u)",type);
         }
-        pal_set_dev_config_setup(1);
+        if (!ret) // do not update fan config update flag if system fail/terminated
+          pal_set_dev_config_setup(1);
       }
 
       // SDR update after NVMe ready
@@ -7651,12 +7776,12 @@ int pal_get_fan_speed(uint8_t fan, int *rpm)
 #else
 static int
 write_fan_value(const int fan, const char *device, const int value) {
-  char full_name[LARGEST_DEVICE_NAME];
+  char full_name[LARGEST_FILEPATH_LEN];
   char device_name[LARGEST_DEVICE_NAME];
   char output_value[LARGEST_DEVICE_NAME];
 
   snprintf(device_name, LARGEST_DEVICE_NAME, device, fan);
-  snprintf(full_name, LARGEST_DEVICE_NAME, "%s/%s", PWM_DIR, device_name);
+  snprintf(full_name, LARGEST_FILEPATH_LEN, "%s/%s", PWM_DIR, device_name);
   snprintf(output_value, LARGEST_DEVICE_NAME, "%d", value);
   return write_device(full_name, output_value);
 }
@@ -7924,30 +8049,23 @@ pal_set_post_start(uint8_t slot, uint8_t *req_data, uint8_t *res_data, uint8_t *
 int
 pal_get_board_id(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len)
 {
-	gpio_value_t BOARD_ID, BOARD_REV_ID0, BOARD_REV_ID1, BOARD_REV_ID2, SLOT_TYPE;
+	int BOARD_ID, rev, SLOT_TYPE;
 	unsigned char *data = res_data;
 	int completion_code = CC_UNSPECIFIED_ERROR;
 
-	if (fby2_common_get_gpio_val("BOARD_ID", &BOARD_ID) != 0) {
-		*res_len = 0;
-		return completion_code;
-	}
+  BOARD_ID = fby2_common_get_board_id();
+  if (BOARD_ID < 0) {
+    syslog(LOG_WARNING, "pal_get_board_id: fail to get spb board id");
+    *res_len = 0;
+    return completion_code;
+  }
 
-	if (fby2_common_get_gpio_val("BOARD_REV_ID0", &BOARD_REV_ID0) != 0) {
-		*res_len = 0;
-		return completion_code;
-	}
-
-	if (fby2_common_get_gpio_val("BOARD_REV_ID1", &BOARD_REV_ID1) != 0) {
-		*res_len = 0;
-		return completion_code;
-	}
-
-	if (fby2_common_get_gpio_val("BOARD_REV_ID2", &BOARD_REV_ID2) != 0) {
-		*res_len = 0;
-		return completion_code;
-	}
-
+  rev = fby2_common_get_spb_rev();
+  if (rev < 0) {
+    syslog(LOG_WARNING, "pal_get_board_id: fail to get spb rev");
+    *res_len = 0;
+    return completion_code;
+  }
 
 	switch(fby2_get_slot_type(slot))
 	{
@@ -7969,7 +8087,7 @@ pal_get_board_id(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_
 	}
 
 	*data++ = BOARD_ID;
-	*data++ = (BOARD_REV_ID2 << 2) | (BOARD_REV_ID1 << 1) | BOARD_REV_ID0;
+	*data++ = rev;
 	*data++ = slot;
 	*data++ = SLOT_TYPE;
 	*res_len = data - res_data;
@@ -8055,7 +8173,14 @@ pal_set_boot_order(uint8_t slot, uint8_t *boot, uint8_t *res_data, uint8_t *res_
     }
 
     snprintf(tstr, 3, "%02x", boot[i]);
+#if __GNUC__ >= 8
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-truncation"
     strncat(str, tstr, 3);
+#pragma GCC diagnostic pop
+#else
+    strncat(str, tstr, 3);
+#endif
   }
 
   // not allow having more than 1 network boot device in the boot order
@@ -9237,8 +9362,16 @@ pal_init_sensor_check(uint8_t fru, uint8_t snr_num, void *snr) {
   snr_chk->last_val = 0;
 
   snr_desc = get_sensor_desc(fru, snr_num);
+#if __GNUC__ >= 8
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-truncation"
   strncpy(snr_desc->name, psnr->name, sizeof(snr_desc->name));
   snr_desc->name[sizeof(snr_desc->name)-1] = 0;
+#pragma GCC diagnostic pop
+#else
+  strncpy(snr_desc->name, psnr->name, sizeof(snr_desc->name));
+  snr_desc->name[sizeof(snr_desc->name)-1] = 0;
+#endif
 
   return 0;
 }
@@ -9523,7 +9656,7 @@ int pal_bypass_cmd(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *re
       } else {
         sprintf(sendcmd, "ifdown eth%d", netdev);
       }
-      system(sendcmd);
+      log_system(sendcmd);
       completion_code = CC_SUCCESS;
       break;
     default:
@@ -11118,7 +11251,7 @@ static void* generate_dump(void* arg) {
     int slot_id = *(int*)arg;
     memset(cmd, 0, MAX_CRASHDUMP_CMD_SIZE);
     snprintf(cmd, MAX_CRASHDUMP_CMD_SIZE, "%s slot%d", CRASHDUMP_ND_BIN, slot_id);
-    system(cmd);
+    log_system(cmd);
 
     free(cmd);
     free(arg);
@@ -11440,7 +11573,7 @@ pal_add_imc_log(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_d
   if (status == IMC_DUMP_START) {
     sprintf(path, IMC_START_FILE, slot);
     sprintf(cmd, "touch %s", path);
-    system(cmd);
+    log_system(cmd);
     syslog(LOG_INFO, "IMC Log Start on slot%u", slot);
   }
 
@@ -11450,7 +11583,7 @@ pal_add_imc_log(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_d
       syslog(LOG_INFO, "IMC Log Start on slot%u", slot);
     } else {
       sprintf(cmd, "rm %s", path);
-      system(cmd);
+      log_system(cmd);
     }
   }
 
@@ -11468,11 +11601,11 @@ pal_add_imc_log(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_d
     if(st.st_size > IMC_LOG_FILE_SIZE) {   //Do IMC log backup action
       sprintf(path, IMC_LOG_FILE_BAK, slot);
       sprintf(cmd, "mv %s %s", imc_log_path[slot], path);
-      system(cmd);
+      log_system(cmd);
 
       memset(cmd, 0, sizeof(cmd));
       sprintf(cmd, "touch %s", imc_log_path[slot]);
-      system(cmd);
+      log_system(cmd);
     }
   }
 
@@ -12079,13 +12212,8 @@ pal_dev_jtag_gpio_to_bus(uint8_t fru) {
   return bus;
 }
 
-bool 
+bool
 pal_sensor_is_cached(uint8_t fru, uint8_t sensor_num) {
-  if (fru == FRU_SPB) {
-    if (sensor_num == SP_SENSOR_BMC_HSC_PIN) {
-      return false;
-    }
-  }
   return true;
 }
 
@@ -12115,4 +12243,47 @@ pal_is_host_snr_available(uint8_t fru, uint8_t snr_num) {
     }
   }
   return false;
+}
+
+
+// OEM Command "CMD_OEM_BYPASS_DEV_CARD" 0x35
+int pal_bypass_dev_card(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len){
+  int ret = 0;
+  uint8_t netfn = 0xFF, cmd = 0xFF;
+  uint8_t tlen = 0;
+  uint8_t status = 0;
+  uint8_t target_slot = 0;
+
+  *res_len = 0;
+
+  if (!pal_is_slot_server(slot)) {
+    return CC_PARAM_OUT_OF_RANGE;
+  }
+
+  target_slot = slot - 1;
+  ret = pal_is_fru_prsnt(target_slot, &status);
+  if (ret < 0 || status == 0) { // FRU not present
+    return CC_UNSPECIFIED_ERROR;
+  } else {
+    if (fby2_get_slot_type(target_slot) != SLOT_TYPE_GPV2) {
+      return CC_UNSPECIFIED_ERROR;
+    }
+  }
+
+  tlen = req_len - 5; // payload_id, netfn, cmd, data[0] (bypass netfn), data[1] (bypass cmd)
+  if (tlen < 0) {
+    return CC_INVALID_LENGTH;
+
+  }
+  netfn = req_data[0];
+  cmd = req_data[1];
+
+  // Bypass command to device card
+  if (tlen != 0) {
+    ret = bic_ipmb_wrapper(target_slot, netfn, cmd, &req_data[2], tlen, res_data, res_len);
+  } else {
+    ret = bic_ipmb_wrapper(target_slot, netfn, cmd, NULL, 0, res_data, res_len);
+  }
+
+  return (ret == 0)? CC_SUCCESS: CC_UNSPECIFIED_ERROR;
 }

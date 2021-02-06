@@ -108,8 +108,20 @@
 #define BIOS_VER_REGION_SIZE (4*1024*1024)
 #define BIOS_ERASE_PKT_SIZE  (64*1024)
 
+#define NUM_SERVER_FRU  1
+#define NUM_NIC_FRU     1
+#define NUM_BMC_FRU     1
+
+
 const char pal_fru_list[] = "all, mb, nic, riser_slot2, riser_slot3, riser_slot4";
 const char pal_server_list[] = "mb";
+const char *pal_server_fru_list[NUM_SERVER_FRU] = {"mb"};
+const char *pal_nic_fru_list[NUM_NIC_FRU] = {"nic"};
+const char *pal_bmc_fru_list[NUM_BMC_FRU] = {"bmc"};
+
+size_t server_fru_cnt = NUM_SERVER_FRU;
+size_t nic_fru_cnt  = NUM_NIC_FRU;
+size_t bmc_fru_cnt  = NUM_BMC_FRU;
 
 size_t pal_pwm_cnt = 2;
 size_t pal_tach_cnt = 2;
@@ -3223,7 +3235,7 @@ pal_set_rst_btn(uint8_t slot, uint8_t status) {
 }
 
 // Update the LED for the given slot with the status
-int 
+int
 pal_set_sled_led(uint8_t fru, uint8_t status) {
   int ret = -1;
 
@@ -3456,6 +3468,32 @@ pal_get_fru_list(char *list) {
 
   strcpy(list, pal_fru_list);
   return 0;
+}
+
+int
+pal_get_fru_capability(uint8_t fru, unsigned int *caps)
+{
+  int ret = 0;
+  switch (fru) {
+    case FRU_MB:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL |
+        FRU_CAPABILITY_SERVER | FRU_CAPABILITY_MANAGEMENT_CONTROLLER |
+        FRU_CAPABILITY_POWER_ALL;
+      break;
+    case FRU_NIC:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL |
+        FRU_CAPABILITY_NETWORK_CARD;
+      break;
+    case FRU_RISER_SLOT2:
+    case FRU_RISER_SLOT3:
+    case FRU_RISER_SLOT4:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL;
+      break;
+    default:
+      ret = -1;
+      break;
+  }
+  return ret;
 }
 
 int
@@ -5506,7 +5544,7 @@ int
 pal_get_fan_speed(uint8_t fan, int *rpm) {
   int ret;
   float value = 0.0;
-  
+
   if (fan == 0) {
     ret = sensors_read_fan("fan1", &value);
   } else if (fan == 1) {

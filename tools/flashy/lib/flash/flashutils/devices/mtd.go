@@ -55,17 +55,14 @@ func getMTD(deviceSpecifier string) (FlashDevice, error) {
 	}, nil
 }
 
-type WritableMountedMTD struct {
-	Device     string
-	Mountpoint string
-}
-
+// MemoryTechnologyDevice contains information of an MTD, and implements FlashDevice.
 type MemoryTechnologyDevice struct {
 	Specifier string
 	FilePath  string
 	FileSize  uint64
 }
 
+// MtdType represents a constant for the type of the flash device.
 const MtdType = "mtd"
 
 func (m *MemoryTechnologyDevice) GetType() string {
@@ -84,8 +81,8 @@ func (m *MemoryTechnologyDevice) GetFileSize() uint64 {
 	return m.FileSize
 }
 
-// mmaps the whole file, readonly
-// Munmap call required to release the buffer
+// MmapRO mmaps the whole file in readonly mode.
+// A Munmap call is required to release the buffer.
 func (m *MemoryTechnologyDevice) MmapRO() ([]byte, error) {
 	// use mmap
 	mmapFilePath, err := GetMTDBlockFilePath(m.FilePath)
@@ -125,37 +122,4 @@ var GetMTDBlockFilePath = func(filepath string) (string, error) {
 		mtdPathMap["devmtdpath"],
 		mtdPathMap["mtdnum"],
 	), nil
-}
-
-// return all writable mounted MTDs as specified in /proc/mounts
-var GetWritableMountedMTDs = func() ([]WritableMountedMTD, error) {
-	writableMountedMTDs := []WritableMountedMTD{}
-
-	procMountsBuf, err := fileutils.ReadFile("/proc/mounts")
-	if err != nil {
-		return writableMountedMTDs,
-			errors.Errorf("Unable to get writable mounted MTDs: Cannot read /proc/mounts: %v", err)
-	}
-	procMounts := string(procMountsBuf)
-
-	// device, mountpoint, filesystem, options, dump_freq, fsck_pass
-	regEx := `(?m)^(?P<device>/dev/mtd(?:block)?[0-9]+) (?P<mountpoint>[^ ]+) [^ ]+ [^ ]*rw[^ ]* [0-9]+ [0-9]+$`
-
-	allMTDMaps, err := utils.GetAllRegexSubexpMap(regEx, procMounts)
-	if err != nil {
-		return writableMountedMTDs,
-			errors.Errorf("Unable to get writable mounted MTDs: %v", err)
-	}
-
-	for _, mtdMap := range allMTDMaps {
-		writableMountedMTDs =
-			append(writableMountedMTDs,
-				WritableMountedMTD{
-					mtdMap["device"],
-					mtdMap["mountpoint"],
-				},
-			)
-	}
-
-	return writableMountedMTDs, nil
 }

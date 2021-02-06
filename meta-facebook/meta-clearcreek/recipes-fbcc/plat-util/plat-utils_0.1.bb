@@ -23,6 +23,13 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=eb723b61539feef013de476e68b5c50a"
 
 SRC_URI = "file://ast-functions \
            file://setup-gpio.sh \
+           file://setup-usbnet.sh \
+           file://setup-usbhub.sh \
+           file://setup-m2carrier.sh \
+           file://sync-rtc.sh \
+           file://run-sync-rtc.sh \
+           file://setup-i2c.sh \
+           file://setup-por.sh \
            file://COPYING \
           "
 
@@ -49,6 +56,18 @@ do_install() {
   install -d ${D}${sysconfdir}/rcS.d
   install -m 755 setup-gpio.sh ${D}${sysconfdir}/init.d/setup-gpio.sh
   update-rc.d -r ${D} setup-gpio.sh start 59 5 .
+  install -m 755 setup-i2c.sh ${D}${sysconfdir}/init.d/setup-i2c.sh
+  update-rc.d -r ${D} setup-i2c.sh start 66 5 .
+  install -m 755 setup-usbhub.sh ${D}${sysconfdir}/init.d/setup-usbhub.sh
+  update-rc.d -r ${D} setup-usbhub.sh start 90 S .
+  install -m 755 setup-usbnet.sh ${D}${sysconfdir}/init.d/setup-usbnet.sh
+  update-rc.d -r ${D} setup-usbnet.sh start 69 5 .
+  install -m 755 sync-rtc.sh ${D}${sysconfdir}/init.d/sync-rtc.sh
+  install -m 755 run-sync-rtc.sh ${D}${sysconfdir}/init.d/run-sync-rtc.sh
+  update-rc.d -r ${D} run-sync-rtc.sh start 99 5 .
+  install -m 755 setup-por.sh ${D}${sysconfdir}/init.d/setup-por.sh
+  update-rc.d -r ${D} setup-por.sh start 70 S .
+  install -m 755 setup-m2carrier.sh ${D}${sysconfdir}/init.d/setup-m2carrier.sh
 }
 
 FILES_${PN} += "/usr/local ${sysconfdir}"

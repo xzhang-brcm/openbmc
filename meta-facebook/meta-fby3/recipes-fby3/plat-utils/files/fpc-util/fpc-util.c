@@ -30,36 +30,6 @@ print_usage(void) {
   printf("fpc-util <slot1|slot2|slot3|slot4> <1U-dev0|1U-dev1|1U-dev2|1U-dev3> --identify <on/off>\n");
 }
 
-static int
-sb_set_amber_led(uint8_t fru, bool led_on) {
-  int ret = 0;
-  int i2cfd = -1;
-  uint8_t bus = 0;
-
-  ret = fby3_common_get_bus_id(fru);
-  if ( ret < 0 ) {
-    printf("%s() Couldn't get the bus id of fru%d\n", __func__, fru);
-    goto err_exit;
-  }
-  bus = (uint8_t)ret + 4;
-
-  i2cfd = i2c_cdev_slave_open(bus, SB_CPLD_ADDR, I2C_SLAVE_FORCE_CLAIM);
-  if ( i2cfd < 0 ) {
-    printf("%s() Couldn't open i2c bus%d, err: %s\n", __func__, bus, strerror(errno));
-    goto err_exit;
-  }
-
-  uint8_t tbuf[2] = {0xf, (led_on == true)?0x01:0x00};
-  ret = i2c_rdwr_msg_transfer(i2cfd, (SB_CPLD_ADDR << 1), tbuf, 2, NULL, 0);
-  if ( ret < 0 ) {
-    printf("%s() Couldn't write data to addr %02X, err: %s\n",  __func__, SB_CPLD_ADDR, strerror(errno));
-  }
-
-err_exit:
-  if ( i2cfd > 0 ) close(i2cfd);
-  return ret;
-}
-
 int
 main(int argc, char **argv) {
   uint8_t fru = 0;
@@ -88,13 +58,15 @@ main(int argc, char **argv) {
     is_dev = false;
   }
 
-  if ( strcmp(argv[identify_idx], "--identify") != 0 ) goto err_exit;
-  if ( strcmp(argv[on_off_idx], "on") == 0 ) is_led_on = true;
-  else if ( strcmp(argv[on_off_idx], "off") == 0 ) is_led_on = false;
-  else goto err_exit;
-
-  if ( fby3_common_get_bmc_location(&bmc_location) < 0 ) {
-    printf("Couldn't get the location of BMC\n");
+  if ( strcmp(argv[identify_idx], "--identify") != 0 ) {
+    goto err_exit;
+  }
+  
+  if ( strcmp(argv[on_off_idx], "on") == 0 ) {
+    is_led_on = true;
+  } else if ( strcmp(argv[on_off_idx], "off") == 0 ) {
+    is_led_on = false;
+  } else {
     goto err_exit;
   }
 
@@ -113,23 +85,32 @@ main(int argc, char **argv) {
     uint8_t dev_id = DEV_NONE;
 
     // check the location
+    if ( fby3_common_get_bmc_location(&bmc_location) < 0 ) {
+      printf("Couldn't get the location of BMC\n");
+      goto err_exit;
+    }
+    
     if ( bmc_location == NIC_BMC ) {
-      printf("1OU is not supported!\n");
+      printf("Config C is not supported!\n");
       goto err_exit;
     }
 
     // reset status and read bic_is_m2_exp_prsnt_cache
     status = CONFIG_UNKNOWN;
-    ret = bic_is_m2_exp_prsnt_cache(fru);
-    if ( ret < 0 ) {
+    status = bic_is_m2_exp_prsnt_cache(fru);
+    if ( status < 0 ) {
       printf("Couldn't read bic_is_m2_exp_prsnt_cache\n");
       goto err_exit;
     }
 
-    // is EDSFF_1U present?
-    status = (uint8_t)ret;
+    // is 1OU present?
+    if ( (status & PRESENT_1OU) != PRESENT_1OU ) {
+      printf("1OU board is not present, device identification only support in E1S 1OU board\n");
+      goto err_exit;
+    }
+
     if ( bic_get_1ou_type(fru, &type) < 0 || type != EDSFF_1U ) {
-      printf("Only support 1OU E1S board, get %02X(Expected: %02X)\n", type, EDSFF_1U);
+      printf("Device identification only support in E1S 1OU board, get %02X (Expected: %02X)\n", type, EDSFF_1U);
       goto err_exit;
     }
 
@@ -145,12 +126,15 @@ main(int argc, char **argv) {
       goto err_exit;
     }
 
-    if ( is_led_on == true ) ret = bic_set_amber_led(fru, dev_id, 0xFE);
-    else ret = bic_set_amber_led(fru, dev_id, 0x00);
+    if ( is_led_on == true ) {
+      ret = bic_set_amber_led(fru, dev_id, 0x01);
+    } else {
+      ret = bic_set_amber_led(fru, dev_id, 0x00);
+    }
     printf("fpc-util: identification for %s %s is set to %s %ssuccessfully\n", \
                          argv[1], argv[2], argv[4], (ret < 0)?"un":"");
   } else {
-    ret = sb_set_amber_led(fru, is_led_on);
+    ret = pal_sb_set_amber_led(fru, is_led_on);
     printf("fpc-util: identification for %s is set to %s %ssuccessfully\n", \
                          argv[1], argv[3], (ret < 0)?"un":"");
   }

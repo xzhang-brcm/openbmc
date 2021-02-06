@@ -33,16 +33,15 @@ from utils.ssh_util import OpenBMCSSHSession
 # catch the import failure
 SANDCASTLE_NEXUS = "SANDCASTLE_NEXUS"
 DEV_SERVER_RESOURCE_PATH = (
-    "/sandcastle/temp/fw_upgrade"
+    os.path.join(os.environ[SANDCASTLE_NEXUS], "fw_upgrade")
     if SANDCASTLE_NEXUS in os.environ
     else "/tmp/fw_upgrade"
 )
 
 try:
     # The upgrader need to be inside e.g. /tmp/fw_upgrade on dev server.
-    sys.path.append(DEV_SERVER_RESOURCE_PATH)
+    sys.path.insert(0, DEV_SERVER_RESOURCE_PATH)
     import fw_json as fw_up
-    from entity_upgrader import FwEntityUpgrader, FwUpgrader
     from constants import (
         UFW_NAME,
         UFW_VERSION,
@@ -52,6 +51,7 @@ try:
         UFW_GET_VERSION,
         UFW_CMD,
     )
+    from entity_upgrader import FwEntityUpgrader, FwUpgrader
 except Exception:
     pass
 
@@ -171,11 +171,13 @@ class BaseFwUpgradeTest(object):
     def set_ssh_session_bmc_hostname(self):
         self.hostname = os.environ.get("TEST_HOSTNAME", self.USERVER_HOSTNAME)
         self.bmc_hostname = os.environ.get("TEST_BMC_HOSTNAME", self.BMC_HOSTNAME)
+        if "mpk" or "fre" in self.bmc_hostname:
+            self.bmc_hostname += ".fbinfra.net"
         pass
 
     def set_optional_arguments(self):
         """
-            Parse optional arguments from cit_runner.py --fw-opt-args
+        Parse optional arguments from cit_runner.py --fw-opt-args
         """
         global G_VERBOSE
         optional_args = os.environ.get("TEST_FW_OPT_ARGS", None)
@@ -222,7 +224,7 @@ class BaseFwUpgradeTest(object):
 
     def connect_to_remote_host(self, logging=False):
         """
-            method to open ssh session to perform external testing
+        method to open ssh session to perform external testing
         """
         if logging:
             self.print_line(
@@ -242,7 +244,7 @@ class BaseFwUpgradeTest(object):
 
     def is_connection_ready(self):
         """
-            Check status of ssh session
+        Check status of ssh session
         """
         ret = False
         if self.bmc_ssh_session.session.isalive():
@@ -252,7 +254,7 @@ class BaseFwUpgradeTest(object):
 
     def reconnect_to_remote_host(self, timeout=30, logging=False):
         """
-            reconnect to remote DUT until the timeout is expired
+        reconnect to remote DUT until the timeout is expired
         """
         if logging:
             self.print_line(
@@ -289,7 +291,7 @@ class BaseFwUpgradeTest(object):
 
     def power_cycle_UUT_and_close_session(self, logging=False):
         """
-            power cycle UUT and close ssh session
+        power cycle UUT and close ssh session
         """
         if not self.bmc_ssh_session.session.isalive():
             if not self.reconnect_to_remote_host(30):
@@ -310,8 +312,8 @@ class BaseFwUpgradeTest(object):
 
     def wait_until(self, predicate, timeout: int):
         """
-            helper method for waiting some process until it's finished
-            or timeout's expired
+        helper method for waiting some process until it's finished
+        or timeout's expired
         """
         end = time.time() + timeout
         while time.time() < end:
@@ -323,14 +325,14 @@ class BaseFwUpgradeTest(object):
 
     def dispose_resource(self):
         """
-            dispose method to unset variable and clean up the resource.
+        dispose method to unset variable and clean up the resource.
         """
         if self.bmc_ssh_session:
             self.bmc_ssh_session.session.close()
 
     def recovery_normal_environment(self):
         """
-            recover UUT to normal environment
+        recover UUT to normal environment
         """
         if self.bmc_ssh_session:
             if self.bmc_ssh_session.session.isalive():
@@ -338,8 +340,8 @@ class BaseFwUpgradeTest(object):
 
     def verify_binary_checksum_on_remote_target(self, logging=False):
         """
-            verify that the firmware binary hash on UUT matches
-            the ones in the json
+        verify that the firmware binary hash on UUT matches
+        the ones in the json
         """
         if logging:
             self.print_line(
@@ -383,8 +385,8 @@ class BaseFwUpgradeTest(object):
 
     def checking_components_version(self, components=None, logging=False):
         """
-            check and compare between firmware package and running version
-            on remote host
+        check and compare between firmware package and running version
+        on remote host
         """
         if logging:
             self.print_line(
@@ -430,8 +432,10 @@ class BaseFwUpgradeTest(object):
                     entityUpgradeObj = FwEntityUpgrader(
                         fw_entity, self.json, self.upgrader_path
                     )
-                    need_to_upgrade = entityUpgradeObj._compare_current_and_package_versions(
-                        current_ver, package_ver
+                    need_to_upgrade = (
+                        entityUpgradeObj._compare_current_and_package_versions(
+                            current_ver, package_ver
+                        )
                     )
                 except Exception:
                     pass
@@ -489,7 +493,7 @@ class BaseFwUpgradeTest(object):
         has_append=False,
     ):
         """
-          print aligned and justified text line
+        print aligned and justified text line
         """
         if line_width is None:
             line_width = self.MAX_LINE_LEN
@@ -509,7 +513,7 @@ class BaseFwUpgradeTest(object):
 
     def print_warning(self, messages):
         """
-           display warning message while processing.
+        display warning message while processing.
         """
         if G_VERBOSE:
             print("Warning!")
@@ -520,7 +524,7 @@ class BaseFwUpgradeTest(object):
 
     def show_failed_test_log(self, component_test_data):
         """
-           display more details of each failed test case.
+        display more details of each failed test case.
         """
         print()
         self.print_line("", "center", "*")
@@ -545,7 +549,7 @@ class BaseFwUpgradeTest(object):
         logging=False,
     ):
         """
-           summary test result and show the failed test log
+        summary test result and show the failed test log
         """
         failed_test = False
         failures_cnt = 0
@@ -603,7 +607,7 @@ class BaseFwUpgradeTest(object):
 
     def upgrade_components(self, components_to_upgrade, logging=False):
         """
-            main method to check and upgrade the components
+        main method to check and upgrade the components
         """
         for component in components_to_upgrade:
             # Start timestamp
@@ -656,11 +660,11 @@ class BaseFwUpgradeTest(object):
 
     def do_external_firmware_upgrade(self, component=None):
         """
-            Main function to perform collective and individual firmware upgrade
-            for components according to entity in json file
-            To perform individual firmware upgrading, please pass the "component"
-            parameter is the name of component. It's supposed to match the entity
-            name in json file. e.g. bios, scm, ... etc.
+        Main function to perform collective and individual firmware upgrade
+        for components according to entity in json file
+        To perform individual firmware upgrading, please pass the "component"
+        parameter is the name of component. It's supposed to match the entity
+        name in json file. e.g. bios, scm, ... etc.
         """
         Logger.info("Start firmware upgrade test!")
         components_to_upgrade = []

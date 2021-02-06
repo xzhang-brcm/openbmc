@@ -28,14 +28,12 @@ import (
 	"github.com/pkg/errors"
 )
 
-/*
- e.g. “mtd:flash0” -> type=”mtd” specifier=”flash0”
- TODO:- e.g. “emmc:0” -> type=”emmc” specifier=”0”
- TODO:- e.g. “pfr:primary” -> type=”pfr” specifier=”primary”
- TODO:- e.g. “file:/dev/sda” -> type=”file” specifier=”/dev/sda”
-*/
-// parses device ID and returns (type, specifier, nil)
-// returns an error if parsing failed
+// parseDeviceID parses a given device ID and returns (type, specifier, nil).
+// It returns an error if parsing failed.
+// e.g. “mtd:flash0” -> type=”mtd” specifier=”flash0”
+// TODO:- e.g. “emmc:0” -> type=”emmc” specifier=”0”
+// TODO:- e.g. “pfr:primary” -> type=”pfr” specifier=”primary”
+// TODO:- e.g. “file:/dev/sda” -> type=”file” specifier=”/dev/sda”
 var parseDeviceID = func(deviceID string) (string, string, error) {
 	regEx := `^(?P<type>[a-z]+):(?P<specifier>.+)$`
 
@@ -83,7 +81,7 @@ var CheckFlashDeviceValid = func(deviceID string) error {
 // CheckAnyFlashDeviceValid returns nil if any of the two
 // flash devices (mtd:flash0, mtd:flash1) are valid.
 // This is used to check whether it is actually safe to reboot;
-// if both flash devices are corrtupt, the device will brick upon reboot.
+// if both flash devices are corrupt, the device will brick upon reboot.
 // If the device only exposes one flash, the other flash is deemed invalid.
 // For PFR devices, this step is skipped, since it is guaranteed to be safe to
 // reboot in this context.

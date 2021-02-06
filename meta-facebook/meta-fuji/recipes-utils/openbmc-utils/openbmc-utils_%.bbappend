@@ -17,8 +17,11 @@
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 
+PACKAGECONFIG += "disable-watchdog"
+
 SRC_URI += "file://setup-gpio.sh \
             file://board-utils.sh \
+            file://boot_info.sh \
             file://setup_board.sh \
             file://setup_i2c.sh \
             file://sol.sh \
@@ -29,15 +32,25 @@ SRC_URI += "file://setup-gpio.sh \
             file://peutil \
             file://power-on.sh \
             file://presence_util.sh \
+            file://read_sled.sh \
             file://setup_avs.sh \
-            file://eth0_mac_fixup.sh \
             file://setup_bic.sh \
             file://setup_mgmt.sh \
             file://spi_util.sh \
+            file://smbutil \
+            file://beutil \
+            file://set_sled.sh \
+            file://parallel_update_pims.sh \
+            file://dump_pim_serials.sh \
+            file://switch_pim_mux_to_fpga.sh \
+            file://reinit_all_pim.sh \
+            file://wedge_us_mac.sh \
+            file://eth0_mac_fixup.sh \
            "
 
 OPENBMC_UTILS_FILES += " \
     board-utils.sh \
+    boot_info.sh \
     sol.sh \
     cpld_update.sh \
     wedge_power.sh \
@@ -45,11 +58,19 @@ OPENBMC_UTILS_FILES += " \
     seutil \
     peutil \
     presence_util.sh\
+    read_sled.sh \
     setup_avs.sh \
-    eth0_mac_fixup.sh \
     setup_bic.sh \
     setup_mgmt.sh \
     spi_util.sh \
+    smbutil \
+    beutil \
+    set_sled.sh \
+    parallel_update_pims.sh \
+    dump_pim_serials.sh \
+    switch_pim_mux_to_fpga.sh \
+    reinit_all_pim.sh \
+    wedge_us_mac.sh \
     "
 DEPENDS_append = " update-rc.d-native"
 
@@ -93,6 +114,10 @@ do_install_board() {
 
     install -m 755 setup_board.sh ${D}${sysconfdir}/init.d/setup_board.sh
     update-rc.d -r ${D} setup_board.sh start 80 S .
+
+    # create VLAN intf automatically
+    install -d ${D}/${sysconfdir}/network/if-up.d
+    install -m 755 create_vlan_intf ${D}${sysconfdir}/network/if-up.d/create_vlan_intf
 
     install -m 0755 ${WORKDIR}/rc.local ${D}${sysconfdir}/init.d/rc.local
     update-rc.d -r ${D} rc.local start 99 2 3 4 5 .

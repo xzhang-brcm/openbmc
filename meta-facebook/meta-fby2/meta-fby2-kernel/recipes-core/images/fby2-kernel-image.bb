@@ -45,8 +45,6 @@ IMAGE_INSTALL += " \
   me-util \
   crashdump \
   log-util-v2 \
-  lldp-util \
-  spatula \
   openbmc-utils \
   ipmi-util \
   guid-util \
@@ -66,4 +64,5 @@ IMAGE_INSTALL += " \
   i2craw \
   setup-gpio \
   ncsid-v2 \
+  name-util \
   "

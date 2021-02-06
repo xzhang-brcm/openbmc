@@ -20,6 +20,29 @@ IMAGE_INSTALL += " \
   packagegroup-openbmc-base \
   packagegroup-openbmc-net \
   packagegroup-openbmc-python3 \
+  bic-cache \
+  bic-monitor \
+  bic-util \
+  cpldupdate \
+  libcpldupdate-dll-ast-jtag \
+  fio \
+  flashrom \
+  front-paneld \
+  fscd \
+  fw-util \
+  i2craw \
+  ipmid \
+  ipmbd \
+  ipmitool \
+  log-util-v2 \
+  mdio-util \
+  mterm \
   openbmc-utils \
+  psu-util \
+  rest-api \
+  sensor-util \
+  sensor-mon \
   usb-console \
+  wedge-eeprom \
+  weutil-dhcp-id \
   "

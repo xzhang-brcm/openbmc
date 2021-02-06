@@ -8,12 +8,20 @@ inherit packagegroup
 RDEPENDS_${PN} += " \
   bind-utils \
   curl \
-  dhcp-client \
   iproute2 \
   libndp \
-  ntp \
   ntpdate \
-  ntpq \
   openssh-sftp-server \
-  sntp \
   "
+
+def openbmc_net_dhcpclient(d):
+    distro = d.getVar('DISTRO_CODENAME', True)
+    if distro in [ 'rocko', 'warrior', 'zeus', 'dunfell' ]:
+        return "dhcp-client"
+    return "dhcpcd"
+
+RDEPENDS_${PN}_append = " \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'systemd', \
+                         '', \
+                         'ntp ntpq sntp ' + openbmc_net_dhcpclient(d), d)} \
+    "

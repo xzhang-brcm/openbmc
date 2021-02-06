@@ -670,6 +670,11 @@ app_manufacturing_test_on (unsigned char *request, unsigned char req_len,
     if (system("/usr/local/bin/power-util sled-cycle") != 0) {
       res->cc = CC_UNSPECIFIED_ERROR;
     }
+  } else if ((!memcmp(req->data, "obmc-dump", strlen("obmc-dump"))) &&
+      (req_len - ((void*)req->data - (void*)req)) == strlen("obmc-dump")) {
+    if (system("/usr/local/bin/obmc-dump") != 0) {
+      res->cc = CC_UNSPECIFIED_ERROR;
+    }
   } else {
     res->cc = CC_INVALID_PARAM;
   }
@@ -3020,6 +3025,18 @@ oem_bypass_cmd(unsigned char *request, unsigned char req_len,
 }
 
 static void
+oem_bypass_dev_card(unsigned char *request, unsigned char req_len,
+                          unsigned char *response, unsigned char *res_len)
+{
+  ipmi_mn_req_t *req = (ipmi_mn_req_t *) request;
+  ipmi_res_t *res = (ipmi_res_t *) response;
+
+  res->cc = pal_bypass_dev_card(req->payload_id, req->data, req_len, res->data, res_len);
+
+  return;
+}
+
+static void
 oem_get_board_id(unsigned char *request, unsigned char req_len,
 					unsigned char *response, unsigned char *res_len)
 {
@@ -3393,6 +3410,123 @@ oem_set_bios_cap_fw_ver(unsigned char *request, unsigned char req_len,
 }
 
 static void
+oem_set_fscd(unsigned char *request, unsigned char req_len,
+                   unsigned char *response, unsigned char *res_len)
+{
+  ipmi_mn_req_t *req = (ipmi_mn_req_t *) request;
+  ipmi_res_t *res = (ipmi_res_t *) response;
+  unsigned char data = req->data[0];
+  char cmd[100] = {0};
+
+  switch (data)
+  {
+    case 0x00:
+      sprintf(cmd, "sv stop fscd");
+      break;
+    case 0x01:
+      sprintf(cmd, "sv start fscd");
+      break;
+    default:
+      res->cc = CC_INVALID_CMD;
+      break;
+  }
+  
+  if (system(cmd)) {
+    syslog(LOG_WARNING, "set fscd cmd failed (%s)\n", cmd);
+    res->cc = CC_UNSPECIFIED_ERROR;
+  } else {
+    res->cc = CC_SUCCESS;
+  }
+}
+
+static void
+oem_set_slot_power_policy(unsigned char *request, unsigned char req_len,
+                   unsigned char *response, unsigned char *res_len)
+{
+  ipmi_mn_req_t *req = (ipmi_mn_req_t *) request;
+  ipmi_res_t *res= (ipmi_res_t *) response;
+  unsigned char *data = &res->data[0];
+  *data++ = 0x07;  // Power restore policy support(bitfield)
+
+  // Set specific slave addr device's power restore policy
+  res->cc = pal_set_slot_power_policy(req->data, res->data);
+  if (res->cc == CC_SUCCESS) {
+    *res_len = data - &res->data[0];
+  }
+}
+
+static void
+oem_get_usb_cdc_status (unsigned char *request, unsigned char req_len,
+                   unsigned char *response, unsigned char *res_len)
+{
+  ipmi_res_t *res= (ipmi_res_t *) response;
+  int ret = 0;
+
+  if (length_check(0, req_len, response, res_len)) {
+    return;
+  }
+
+  ret = system("lsmod | grep -q g_cdc");
+  if (ret != 0) {
+    res->data[0] = DISABLE_USB_CDC;
+  } else {
+    res->data[0] = ENABLE_USB_CDC;
+  }
+
+  res->cc = CC_SUCCESS;
+  *res_len = 1;
+}
+
+static void
+oem_control_usb_cdc (unsigned char *request, unsigned char req_len,
+                   unsigned char *response, unsigned char *res_len)
+{
+  ipmi_mn_req_t *req = (ipmi_mn_req_t *) request;
+  ipmi_res_t *res= (ipmi_res_t *) response;
+  uint8_t status_ctrl = req->data[0]; // 0 - disable, 1 - enable
+  int ret = 0;
+
+  if (length_check(1, req_len, response, res_len)) {
+    return;
+  }
+
+  res->cc = CC_SUCCESS;
+
+  if (status_ctrl == DISABLE_USB_CDC) {
+    // Disable USB serial console by usbcons.sh, then unload USB CDC driver
+    ret = run_command("/etc/init.d/usbcons.sh stop");
+    if (ret == 0) {
+      ret = system("modprobe -qr g_cdc");
+      if (WIFEXITED(ret) == 0) {
+        syslog(LOG_ERR, "%s: failed to disable ether-over-usb (usb0), ret: %d\n", __func__, ret);
+        res->cc = CC_UNSPECIFIED_ERROR;
+      }
+    } else {
+      syslog(LOG_ERR, "%s: failed to disable USB serial console, ret: %d\n", __func__, ret);
+      res->cc = CC_UNSPECIFIED_ERROR;
+    }
+  } else if (status_ctrl == ENABLE_USB_CDC){
+    // Enable USB serial console and reload USB CDC driver by usbcons.sh, then link up usb0
+    // The 'restart' action will kill all usbmod.sh processes then start usbmon.sh
+    ret = run_command("/etc/init.d/usbcons.sh restart");
+    if (ret == 0) {
+      ret = system("sleep 1; ifconfig usb0 up");
+      if (WIFEXITED(ret) == 0) {
+        syslog(LOG_ERR, "%s: failed to link up ether-over-usb (usb0), ret: %d\n", __func__, ret);
+        res->cc = CC_UNSPECIFIED_ERROR;
+      }
+    } else {
+      syslog(LOG_ERR, "%s: failed to enable ether-over-usb (usb0), ret: %d\n", __func__, ret);
+      res->cc = CC_UNSPECIFIED_ERROR;
+    }
+  } else {
+    res->cc = CC_INVALID_PARAM;
+  }
+
+  *res_len = 0;
+}
+
+static void
 ipmi_handle_oem (unsigned char *request, unsigned char req_len,
      unsigned char *response, unsigned char *res_len)
 {
@@ -3400,7 +3534,6 @@ ipmi_handle_oem (unsigned char *request, unsigned char req_len,
   ipmi_res_t *res = (ipmi_res_t *) response;
 
   unsigned char cmd = req->cmd;
-
   pthread_mutex_lock(&m_oem);
   switch (cmd)
   {
@@ -3478,6 +3611,9 @@ ipmi_handle_oem (unsigned char *request, unsigned char req_len,
     case CMD_OEM_BYPASS_CMD:
       oem_bypass_cmd (request, req_len, response, res_len);
       break;
+    case CMD_OEM_BYPASS_DEV_CARD:
+      oem_bypass_dev_card (request, req_len, response, res_len);
+      break;
     case CMD_OEM_GET_BOARD_ID:
       oem_get_board_id (request, req_len, response, res_len);
       break;
@@ -3529,6 +3665,18 @@ ipmi_handle_oem (unsigned char *request, unsigned char req_len,
       break;
     case CMD_OEM_SET_BIOS_CAP_FW_VER:
       oem_set_bios_cap_fw_ver(request, req_len, response, res_len);
+      break;
+    case CMD_OEM_SET_FSCD:
+      oem_set_fscd(request, req_len, response, res_len);
+      break;
+    case CMD_OEM_SET_POWER_POLICY:
+      oem_set_slot_power_policy(request, req_len, response, res_len);
+      break;
+    case CMD_OEM_GET_USB_CDC_STATUS:
+      oem_get_usb_cdc_status(request, req_len, response, res_len);
+      break;
+    case CMD_OEM_CTRL_USB_CDC:
+      oem_control_usb_cdc(request, req_len, response, res_len);
       break;
     default:
       res->cc = CC_INVALID_CMD;
@@ -3797,6 +3945,16 @@ ipmi_handle_oem_1s(unsigned char *request, unsigned char req_len,
       res->cc = CC_SUCCESS;
       memcpy(res->data, req->data, SIZE_IANA_ID); //IANA ID
       *res_len = 3;
+      break;
+    case CMD_OEM_1S_GET_SYS_FW_VER:
+      if (req_len == 8) { // payload_id, netfn, cmd, IANA[3], data[0] (fru), data[1] (component)
+        memcpy(res->data, req->data, SIZE_IANA_ID); //IANA ID
+        res->cc = pal_get_fw_ver(req->payload_id, &req->data[3], &res->data[3], res_len);
+        *res_len += SIZE_IANA_ID;        
+      } else {
+        res->cc = CC_INVALID_LENGTH;
+        *res_len = SIZE_IANA_ID;
+      }
       break;
     default:
       res->cc = CC_INVALID_CMD;

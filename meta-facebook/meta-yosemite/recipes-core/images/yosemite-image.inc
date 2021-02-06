@@ -36,7 +36,6 @@ IMAGE_INSTALL += " \
   me-util \
   log-util-v2 \
   lldp-util \
-  spatula \
   openbmc-utils \
   conf-util \
   libncsi \
@@ -45,4 +44,5 @@ IMAGE_INSTALL += " \
   libpldm \
   slot-util \
   snapshot-util \
+  name-util \
   "

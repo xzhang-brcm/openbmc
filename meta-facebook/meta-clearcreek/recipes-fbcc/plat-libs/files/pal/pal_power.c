@@ -7,6 +7,7 @@
 #include <sys/mman.h>
 #include <string.h>
 #include <ctype.h>
+#include <pthread.h>
 #include <openbmc/kv.h>
 #include <openbmc/libgpio.h>
 #include "pal.h"
@@ -16,6 +17,8 @@
 #define GPIO_CPU0_POWER_GOOD "PWRGD_CPU0_LVC3"
 #define GPIO_POWER_RESET "RST_BMC_RSTBTN_OUT_R_N"
 #define GPIO_RESET_BTN_IN "FP_BMC_RST_BTN_N"
+
+#define DRIVER_READY "/tmp/driver_probed"
 
 #define DELAY_POWER_ON 1
 #define DELAY_POWER_OFF 6
@@ -118,10 +121,36 @@ bail:
   return ret;
 }
 
+int check_server_present(void) {
+  bool ret = false;
+  gpio_value_t value;
+  gpio_desc_t *gpio = gpio_open_by_shadow("MB1_CBL_PRSNT_P1_R1");
+
+  if (!gpio) {
+    return false;
+  }
+
+  if (gpio_get_value(gpio, &value) < 0) {
+    goto bail;
+  }
+
+  if (value == GPIO_VALUE_LOW)
+    ret = true;
+  else
+    printf("Block power change while server is present\n");
+
+bail:
+  gpio_close(gpio);
+  return ret; 
+}
+
 // Power Off, Power On, or Power Cycle
 int pal_set_server_power(uint8_t fru, uint8_t cmd)
 {
   uint8_t status;
+
+  if (!check_server_present())
+    return -2; // make power-util not to retry
 
   if (pal_get_server_power(fru, &status) < 0) {
     return -1;
@@ -154,4 +183,96 @@ int pal_set_server_power(uint8_t fru, uint8_t cmd)
   }
 
   return 0;
+}
+
+
+ 
+int pal_force_sled_cycle(void) {
+  // Send command to HSC power cycle
+  return system("i2cset -y 5 0x11 0xd9 c &> /dev/null");
+}
+
+int pal_sled_cycle(void) {
+  return check_server_present()? pal_force_sled_cycle(): -1;
+}
+
+void* chassis_control_handler(void *arg)
+{
+  int cmd = (int)arg;
+
+  switch (cmd) {
+    case 0x00:  // power off
+      if (pal_set_server_power(FRU_MB, SERVER_POWER_OFF) < 0)
+        syslog(LOG_CRIT, "SERVER_POWER_OFF failed");
+      else
+	syslog(LOG_CRIT, "SERVER_POWER_OFF successful");
+      break;
+    case 0x01:  // power on
+      if (pal_set_server_power(FRU_MB, SERVER_POWER_ON) < 0)
+        syslog(LOG_CRIT, "SERVER_POWER_ON failed");
+      else
+	syslog(LOG_CRIT, "SERVER_POWER_ON successful");
+      break;
+    case 0x02:  // power cycle
+      if (pal_set_server_power(FRU_MB, SERVER_POWER_CYCLE) < 0)
+        syslog(LOG_CRIT, "SERVER_POWER_CYCLE failed");
+      else
+	syslog(LOG_CRIT, "SERVER_POWER_CYCLE successful");
+      break;
+    case 0xAC:  // sled-cycle with delay 4 secs
+      sleep(4);
+      pal_force_sled_cycle();
+      break;
+    default:
+      syslog(LOG_CRIT, "Invalid command 0x%x for chassis control", cmd);
+      break;
+  }
+
+  pthread_exit(0);
+}
+
+int pal_chassis_control(uint8_t fru, uint8_t *req_data, uint8_t req_len)
+{
+  int cmd;
+  pthread_t tid;
+  pthread_attr_t a;
+
+  if (fru == 2 && !check_server_present()) {
+    // If came from BMC itself
+    return CC_NOT_SUPP_IN_CURR_STATE;
+  }
+  if (req_len != 1) {
+    return CC_INVALID_LENGTH;
+  }
+  if (pal_is_fw_update_ongoing(FRU_MB)) {
+    return CC_NOT_SUPP_IN_CURR_STATE;
+  }
+
+  cmd = req_data[0];
+  pthread_attr_init(&a);
+  pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+
+  if (pthread_create(&tid, &a, chassis_control_handler, (void *)cmd) < 0) {
+    syslog(LOG_WARNING, "ipmid: chassis_control_handler pthread_create failed\n");
+    return CC_UNSPECIFIED_ERROR;
+  }
+
+  return CC_SUCCESS;
+}
+
+bool pal_is_server_off()
+{
+  uint8_t status;
+
+  if (pal_get_server_power(FRU_MB, &status) < 0)
+    return false;
+
+  return status == SERVER_POWER_OFF? true: false;
+}
+
+bool is_device_ready()
+{
+  if (access(DRIVER_READY, F_OK) == 0)
+    return !pal_is_server_off();
+  return false;
 }

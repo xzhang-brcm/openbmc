@@ -15,6 +15,8 @@
 # 51 Franklin Street, Fifth Floor,
 # Boston, MA 02110-1301 USA
 
+inherit systemd
+
 FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 
 SRC_URI += "file://rest_i2cflush.py \
@@ -23,11 +25,17 @@ SRC_URI += "file://rest_i2cflush.py \
             file://boardroutes.py \
             file://board_setup_routes.py \
             file://rest_fw_ver.py \
+            file://fake_kv.py \
+            file://test_rest_fw_ver.py \
+            file://restapi.service \
+            file://rest_fw_ver.py \
+            file://rest_presence.py \
            "
 
 binfiles1 += "rest_i2cflush.py \
              rest_modbus.py \
              rest_fw_ver.py \
+             rest_presence.py \
              "
 binfiles += "board_endpoint.py \
              boardroutes.py \

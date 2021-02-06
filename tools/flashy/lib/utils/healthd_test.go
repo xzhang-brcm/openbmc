@@ -95,16 +95,14 @@ func TestGetHealthdConfig(t *testing.T) {
 func TestHealthdRemoveMemUtilRebootEntryIfExists(t *testing.T) {
 	// save and defer restore WriteFileWithTimeout and RestartHealthd
 	writeFileOrig := fileutils.WriteFileWithTimeout
-	restartHealthdOrig := RestartHealthd
 	defer func() {
 		fileutils.WriteFileWithTimeout = writeFileOrig
-		RestartHealthd = restartHealthdOrig
 	}()
 
 	cases := []struct {
 		name              string
-		inputJson         string
-		wantJson          string
+		inputJSON         string
+		wantJSON          string
 		writeConfigCalled bool
 		writeConfigErr    error
 		restartHealthdErr error
@@ -112,8 +110,8 @@ func TestHealthdRemoveMemUtilRebootEntryIfExists(t *testing.T) {
 	}{
 		{
 			name:              "basic minimal success",
-			inputJson:         tests.ExampleMinimalHealthdConfigJSON,
-			wantJson:          tests.ExampleMinimalHealthdConfigJSONRemovedReboot,
+			inputJSON:         tests.ExampleMinimalHealthdConfigJSON,
+			wantJSON:          tests.ExampleMinimalHealthdConfigJSONRemovedReboot,
 			writeConfigCalled: true,
 			writeConfigErr:    nil,
 			restartHealthdErr: nil,
@@ -121,8 +119,8 @@ func TestHealthdRemoveMemUtilRebootEntryIfExists(t *testing.T) {
 		},
 		{
 			name:              "minilaketb example",
-			inputJson:         tests.ExampleMinilaketbHealthdConfigJSON,
-			wantJson:          tests.ExampleMinilaketbHealthdConfigJSONRemovedReboot,
+			inputJSON:         tests.ExampleMinilaketbHealthdConfigJSON,
+			wantJSON:          tests.ExampleMinilaketbHealthdConfigJSONRemovedReboot,
 			writeConfigCalled: true,
 			writeConfigErr:    nil,
 			restartHealthdErr: nil,
@@ -130,8 +128,8 @@ func TestHealthdRemoveMemUtilRebootEntryIfExists(t *testing.T) {
 		},
 		{
 			name:              "minilaketb reboot already removed",
-			inputJson:         tests.ExampleMinilaketbHealthdConfigJSONRemovedReboot,
-			wantJson:          tests.ExampleMinilaketbHealthdConfigJSONRemovedReboot,
+			inputJSON:         tests.ExampleMinilaketbHealthdConfigJSONRemovedReboot,
+			wantJSON:          tests.ExampleMinilaketbHealthdConfigJSONRemovedReboot,
 			writeConfigCalled: false,
 			writeConfigErr:    nil,
 			restartHealthdErr: nil,
@@ -139,8 +137,8 @@ func TestHealthdRemoveMemUtilRebootEntryIfExists(t *testing.T) {
 		},
 		{
 			name:              "no bmc_mem_utilization entry in Json",
-			inputJson:         "{}",
-			wantJson:          "",
+			inputJSON:         "{}",
+			wantJSON:          "",
 			writeConfigCalled: false,
 			writeConfigErr:    nil,
 			restartHealthdErr: nil,
@@ -148,12 +146,12 @@ func TestHealthdRemoveMemUtilRebootEntryIfExists(t *testing.T) {
 		},
 		{
 			name: "invalid type for bmc_mem_utilization.threshold (not array)",
-			inputJson: `{
+			inputJSON: `{
 	"bmc_mem_utilization": {
 		"threshold": 42
 	}
 }`,
-			wantJson:          "",
+			wantJSON:          "",
 			writeConfigCalled: false,
 			writeConfigErr:    nil,
 			wantErr: errors.Errorf("Can't get 'bmc_mem_utilization.threshold' entry in healthd-config " +
@@ -161,7 +159,7 @@ func TestHealthdRemoveMemUtilRebootEntryIfExists(t *testing.T) {
 		},
 		{
 			name: "invalid type for bmc_mem_utilization.threshold[x].action (not interface array)",
-			inputJson: `{
+			inputJSON: `{
 	"bmc_mem_utilization": {
 		"threshold": [
 			{
@@ -170,7 +168,7 @@ func TestHealthdRemoveMemUtilRebootEntryIfExists(t *testing.T) {
 		]
 	}
 }`,
-			wantJson:          "",
+			wantJSON:          "",
 			writeConfigCalled: false,
 			writeConfigErr:    nil,
 			restartHealthdErr: nil,
@@ -178,18 +176,9 @@ func TestHealthdRemoveMemUtilRebootEntryIfExists(t *testing.T) {
 				"{\"bmc_mem_utilization\":{\"threshold\":[{\"action\":42}]}}"),
 		},
 		{
-			name:              "restart healthd failure",
-			inputJson:         tests.ExampleMinilaketbHealthdConfigJSON,
-			wantJson:          tests.ExampleMinilaketbHealthdConfigJSONRemovedReboot,
-			writeConfigCalled: true,
-			writeConfigErr:    nil,
-			restartHealthdErr: errors.Errorf("Restart healthd failed"),
-			wantErr:           errors.Errorf("Restart healthd failed"),
-		},
-		{
 			name:              "remove multiple reboot entries",
-			inputJson:         tests.ExampleMinimalHealthdConfigJSONMultipleReboots,
-			wantJson:          tests.ExampleMinimalHealthdConfigJSONRemovedReboot,
+			inputJSON:         tests.ExampleMinimalHealthdConfigJSONMultipleReboots,
+			wantJSON:          tests.ExampleMinimalHealthdConfigJSONRemovedReboot,
 			writeConfigCalled: true,
 			writeConfigErr:    nil,
 			restartHealthdErr: nil,
@@ -197,8 +186,8 @@ func TestHealthdRemoveMemUtilRebootEntryIfExists(t *testing.T) {
 		},
 		{
 			name:              "write config failed",
-			inputJson:         tests.ExampleMinimalHealthdConfigJSON,
-			wantJson:          tests.ExampleMinimalHealthdConfigJSONRemovedReboot,
+			inputJSON:         tests.ExampleMinimalHealthdConfigJSON,
+			wantJSON:          tests.ExampleMinimalHealthdConfigJSONRemovedReboot,
 			writeConfigCalled: true,
 			writeConfigErr:    errors.Errorf("Write config failed"),
 			restartHealthdErr: nil,
@@ -213,10 +202,7 @@ func TestHealthdRemoveMemUtilRebootEntryIfExists(t *testing.T) {
 				writeConfigCalled = true
 				return tc.writeConfigErr
 			}
-			RestartHealthd = func(wait bool, supervisor string) error {
-				return tc.restartHealthdErr
-			}
-			h, err := gabs.ParseJSON([]byte(tc.inputJson))
+			h, err := gabs.ParseJSON([]byte(tc.inputJSON))
 			if err != nil {
 				t.Errorf("%v", err)
 			}
@@ -226,8 +212,8 @@ func TestHealthdRemoveMemUtilRebootEntryIfExists(t *testing.T) {
 				t.Errorf("writeConfigCalled: want '%v' got '%v'",
 					tc.writeConfigCalled, writeConfigCalled)
 			}
-			if len(tc.wantJson) > 0 {
-				wantH, err := gabs.ParseJSON([]byte(tc.wantJson))
+			if len(tc.wantJSON) > 0 {
+				wantH, err := gabs.ParseJSON([]byte(tc.wantJSON))
 				if err != nil {
 					t.Errorf("%v", err)
 				}
@@ -277,14 +263,16 @@ func TestHealthdWriteConfigToFile(t *testing.T) {
 }
 
 func TestRestartHealthd(t *testing.T) {
-	// save and defer restore FileExists, RunCommand & sleepFunc
+	// save and defer restore FileExists, RunCommand & Sleep
 	pathExistsOrig := fileutils.PathExists
 	runCommandOrig := RunCommand
-	sleepFuncOrig := sleepFunc
+	sleepFuncOrig := Sleep
+	petWatchdogOrig := PetWatchdog
 	defer func() {
 		fileutils.PathExists = pathExistsOrig
 		RunCommand = runCommandOrig
-		sleepFunc = sleepFuncOrig
+		Sleep = sleepFuncOrig
+		PetWatchdog = petWatchdogOrig
 	}()
 
 	cases := []struct {
@@ -333,20 +321,20 @@ func TestRestartHealthd(t *testing.T) {
 			wantSleepTime: 0 * time.Second,
 		},
 		{
-			name:          "Restart command returned error",
+			name:          "Start command returned error",
 			wait:          true,
 			supervisor:    "systemctl",
 			pathExists:    true,
 			runCmdErr:     errors.Errorf("RunCommand error"),
 			want:          errors.Errorf("RunCommand error"),
-			wantSleepTime: 0 * time.Second,
+			wantSleepTime: 30 * time.Second,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var gotSleepTime time.Duration
-			sleepFunc = func(t time.Duration) {
+			Sleep = func(t time.Duration) {
 				gotSleepTime = t
 			}
 			fileutils.PathExists = func(filename string) bool {
@@ -356,13 +344,16 @@ func TestRestartHealthd(t *testing.T) {
 				return tc.pathExists
 			}
 			RunCommand = func(cmdArr []string, timeout time.Duration) (int, error, string, string) {
-				wantCmd := fmt.Sprintf("%v restart healthd", tc.supervisor)
+				wantCmd1 := fmt.Sprintf("%v stop healthd", tc.supervisor)
+				wantCmd2 := fmt.Sprintf("%v start healthd", tc.supervisor)
 				gotCmd := strings.Join(cmdArr, " ")
-				if wantCmd != gotCmd {
-					t.Errorf("command: want '%v' got '%v'", wantCmd, gotCmd)
+				if wantCmd1 != gotCmd && wantCmd2 != gotCmd {
+					t.Errorf("command: got unexpected command '%v'", gotCmd)
 				}
 				// exit code ignored
 				return 0, tc.runCmdErr, "", ""
+			}
+			PetWatchdog = func() {
 			}
 			got := RestartHealthd(tc.wait, tc.supervisor)
 

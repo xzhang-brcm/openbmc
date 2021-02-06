@@ -20,6 +20,7 @@
 
 #include <iostream>
 #include <string>
+#include <syslog.h>
 #include <CLI/CLI.hpp>
 #include <openbmc/kv.h>
 #include <openbmc/pal.h>
@@ -37,6 +38,44 @@ enum {
   SLOT_6,
   SLOT_7,
 };
+
+static gpio_value_t gpio_get(std::string shadow)
+{
+  gpio_value_t value = GPIO_VALUE_INVALID;
+  gpio_desc_t *desc = gpio_open_by_shadow(shadow.c_str());
+  if (!desc) {
+    std::cerr << "Open GPIO " << shadow << " failed" << std::endl;
+    return GPIO_VALUE_INVALID;
+  }
+  if (gpio_get_value(desc, &value)) {
+    std::cerr << "Get GPIO " << shadow << " failed" << std::endl;
+    value = GPIO_VALUE_INVALID;
+  }
+  gpio_close(desc);
+  return value;
+}
+
+static int gpio_set(std::string shadow, gpio_value_t value, bool to_input)
+{
+  int ret = 0;
+  gpio_desc_t *desc = gpio_open_by_shadow(shadow.c_str());
+  if (!desc) {
+    std::cerr << "Open GPIO " << shadow << " failed" << std::endl;
+    return -1;
+  }
+  if (gpio_set_direction(desc, GPIO_DIRECTION_OUT) || gpio_set_value(desc, value)) {
+    std::cerr << "Set GPIO " << shadow << " failed" << std::endl;
+    ret = -1;
+  }
+  if (to_input) {
+    if (gpio_set_direction(desc, GPIO_DIRECTION_IN)) {
+      std::cerr << "Set direction failed for GPIO: " << shadow << std::endl;
+      ret = -1;
+    }
+  }
+  gpio_close(desc);
+  return ret;
+}
 
 static int show_linkconfig(int slot)
 {
@@ -313,9 +352,9 @@ static int _show_status(int slot)
   if (slot == SLOT_ALL) {
     for (int i = 0; i < 8; i++) {
       if (is_asic_prsnt((uint8_t)i))
-	show_asic_status(i);
+        show_asic_status(i);
       else
-	std::cout << "ASIC on slot " << i << " is not present" << std::endl;
+        std::cout << "ASIC on slot " << i << " is not present" << std::endl;
     }
   } else {
     if (is_asic_prsnt((uint8_t)slot))
@@ -328,7 +367,17 @@ static int _show_status(int slot)
 
 static int _set_power_limit(int slot, unsigned int watts)
 {
-  int ret;
+  int ret, lock;
+  unsigned int val;
+  char asic_lock[32] = {0};
+
+  snprintf(asic_lock, sizeof(asic_lock), "/tmp/asic_lock%d", slot);
+  lock = open(asic_lock, O_CREAT | O_RDWR, 0666);
+  if (lock < 0) {
+    syslog(LOG_WARNING, "Failed to open ASIC lock %d", slot);
+    return -1;
+  }
+  flock(lock, LOCK_EX);
 
   ret = asic_set_power_limit((uint8_t)slot, watts);
   if (ret < 0) {
@@ -336,12 +385,31 @@ static int _set_power_limit(int slot, unsigned int watts)
       std::cerr << "Power capping is not supported" << std::endl;
     else
       std::cerr << "Failed to set power limit of GPU on slot " << slot << std::endl;
-    return ret;
+    goto bail;
   }
 
-  std::cout << "Set power limit of GPU on slot " << slot
-            << " to " << watts << " Watts"<< std::endl;
-  return 0;
+  ret = asic_get_power_limit((uint8_t)slot, &val);
+  if (ret < 0) {
+    if (ret == ASIC_NOTSUP)
+      std::cerr << "Get power limit is not supported" << std::endl;
+    else
+      std::cerr << "Failed to get power limit of GPU on slot " << slot << std::endl;
+    goto bail;
+  }
+
+  if (watts != val) {
+    std::cerr << "Failed to set power limit of GPU on slot " << slot << std::endl;
+    ret = -1;
+  } else {
+    std::cout << "Set power limit of GPU on slot " << slot
+              << " to " << watts << " Watts" << std::endl;
+    syslog(LOG_CRIT, "Set power limit of GPU on slot %d to %d Watts", (int)slot, watts);
+  }
+
+bail:
+  flock(lock, LOCK_UN);
+  close(lock);
+  return ret;
 }
 
 static int set_power_limit(int slot, unsigned int watts)
@@ -351,11 +419,11 @@ static int set_power_limit(int slot, unsigned int watts)
   if (slot == SLOT_ALL) {
     for (int i = 0; i < 8; i++) {
       if (is_asic_prsnt((uint8_t)i)) {
-	ret = _set_power_limit(i, watts);
-	if (ret < 0)
-	  break;
+        ret = _set_power_limit(i, watts);
+        if (ret < 0)
+          break;
       } else {
-	std::cout << "ASIC on slot " << i << " is not present" << std::endl;
+        std::cout << "ASIC on slot " << i << " is not present" << std::endl;
       }
     }
   } else {
@@ -365,8 +433,69 @@ static int set_power_limit(int slot, unsigned int watts)
       std::cout << "ASIC on slot " << slot << " is not present" << std::endl;
     }
   }
-  return ret; 
+
+  return ret;
 }
+
+/*
+ * BMC can't get the limit before setting it
+ * Refer table 3.9-Async Request in DG-06034-002
+ *
+static int _get_power_limit(int slot)
+{
+  int ret, lock;
+  unsigned int watts;
+  char asic_lock[32] = {0};
+
+  snprintf(asic_lock, sizeof(asic_lock), "/tmp/asic_lock%d", slot);
+  lock = open(asic_lock, O_CREAT | O_RDWR, 0666);
+  if (lock < 0) {
+    syslog(LOG_WARNING, "Failed to open ASIC lock %d", slot);
+    return -1;
+  }
+  flock(lock, LOCK_EX);
+
+  ret = asic_get_power_limit((uint8_t)slot, &watts);
+  if (ret < 0) {
+    if (ret == ASIC_NOTSUP)
+      std::cerr << "Get power limit is not supported" << std::endl;
+    else
+      std::cerr << "Failed to get power limit of GPU on slot " << slot << std::endl;
+    goto bail;
+  }
+  std::cout << "Current power limit of GPU on slot " << slot
+            << " is " << watts << " Watts" << std::endl;
+bail:
+  flock(lock, LOCK_UN);
+  close(lock);
+  return ret;
+}
+
+static int get_power_limit(int slot)
+{
+  int ret = -1;
+
+  if (slot == SLOT_ALL) {
+    for (int i = 0; i < 8; i++) {
+      if (is_asic_prsnt((uint8_t)i)) {
+        ret = _get_power_limit(i);
+        if (ret < 0)
+          break;
+      } else {
+        std::cout << "ASIC on slot " << i << " is not present" << std::endl;
+      }
+    }
+  } else {
+    if (is_asic_prsnt((uint8_t)slot)) {
+      ret = _get_power_limit(slot);
+    } else {
+      std::cout << "ASIC on slot " << slot << " is not present" << std::endl;
+    }
+  }
+
+  return ret;
+}
+*/
 
 static int _show_info(int slot)
 {
@@ -377,30 +506,69 @@ static int _show_info(int slot)
     return -1;
   }
   std::cout << "ASIC Manufacturer: " << vendor << std::endl;
+
+  gpio_value_t brk_on = gpio_get("OAM_FAST_BRK_ON_N");
+  if (brk_on == GPIO_VALUE_INVALID) {
+    std::cerr << "Failed to get GPU power brake status" << std::endl;
+    return -1;
+  }
+  std::cout << "GPU power brake: " << (brk_on == GPIO_VALUE_LOW? "Enabled":"Disabled") << std::endl;
+
+//  get_power_limit(slot);
   return 0;
+}
+
+static int _enable_power_brake(gpio_value_t value)
+{
+  int ret = gpio_set("OAM_FAST_BRK_ON_N", value, false);
+  if (ret == 0)
+    std::cout << (value == GPIO_VALUE_LOW? "Enable":"Disable") << " GPU power brake" << std::endl;
+  return ret;
+}
+
+static int _set_power_brake(gpio_value_t value)
+{
+  int ret;
+
+  if (gpio_get("OAM_FAST_BRK_ON_N") != GPIO_VALUE_LOW) {
+    std::cerr << "GPU power brake function is not enabled, try \"--enable-brake 1\"" << std::endl;
+    return -1;
+  }
+  ret = gpio_set("OAM_FAST_BRK_N", value, false);
+  if (ret == 0)
+    std::cout << (value == GPIO_VALUE_LOW? "Set":"Unset") << " GPU power brake" << std::endl;
+
+  return ret;
 }
 
 int main(int argc, char **argv)
 {
-  int rc = -1;
   CLI::App app("Application-specific IC Utility");
   app.failure_message(CLI::FailureMessage::help);
 
-  int slot;
+
   unsigned int watts;
   auto power = app.add_option("--set-power", watts,
-                              "The value of power limit in Watts [100..300]");
+                              "The value of power limit in Watts [100..400]");
+  int slot;
   auto num = app.add_option("--slot", slot,
                             "Action to specified slot [0..7]\n"
-			    "If not specified, ALL slots by default");
+                            "If not specified, ALL slots by default");
 
-  app.require_option();
+  unsigned int enable_power_brake;
+  auto en_brk = app.add_option("--enable-brake", enable_power_brake,
+                              "Enable GPU Power brake function, 1 = Enable, 0 = Disable");
+
+  unsigned int set_power_brake;
+  auto set_brk = app.add_option("--set-brake", set_power_brake,
+                              "Manually trigger GPU Power brake, 1 = Enable, 0 = Disable");
   bool show_status = false;
   app.add_flag("--status", show_status, "Get ASIC status");
 
   bool show_info = false;
   app.add_flag("--info", show_info, "Get GPU information");
 
+  app.require_option();
   CLI11_PARSE(app, argc, argv);
 
   if (!(*num)) {
@@ -410,10 +578,12 @@ int main(int argc, char **argv)
   }
 
   if (*power) {
-    if (watts < 100 || watts > 300)
-      std::cerr << "Error: Power limit is out-of-range [100..300]" << std::endl;
-    else
-      rc = set_power_limit(slot, watts);
+    if (watts < 100 || watts > 400) {
+      std::cerr << "Error: Power limit is out-of-range [100..400]" << std::endl;
+      return -1;
+    } else {
+      return set_power_limit(slot, watts);
+    }
   }
 
   if (show_status)
@@ -423,5 +593,13 @@ int main(int argc, char **argv)
     return _show_info(slot);
   }
 
-  return rc;
+  if (*en_brk) {
+    return _enable_power_brake(enable_power_brake? GPIO_VALUE_LOW: GPIO_VALUE_HIGH);
+  }
+
+  if (*set_brk) {
+    return _set_power_brake(set_power_brake? GPIO_VALUE_LOW: GPIO_VALUE_HIGH);
+  }
+
+  return 0;
 }

@@ -21,6 +21,11 @@ PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin
 #shellcheck disable=SC1091
 source /usr/local/bin/openbmc-utils.sh
 
+# Board Version EVT2 0x41, EVT3 0x42, DVT1 0x43
+BOARD_VER=$(i2cget -f -y 13 0x35 0x3 | awk '{printf "%d", $1}') #Get board version
+
+# # Bus 0
+i2c_device_add 0 0x1010 slave-mqueue #IPMB 0
 # # Bus 1
 i2c_device_add 1 0x40 xdpe132g5c #ISL68137 DC-DC core
 i2c_device_add 1 0x53 mp2978
@@ -28,7 +33,10 @@ i2c_device_add 1 0x59 mp2978
 
 # # Bus 2
 i2c_device_add 2 0x35 scmcpld  #SCM CPLD
-
+# # Bus 4
+i2c_device_add 4 0x1010 slave-mqueue #IPMB 1
+# # Bus 4
+i2c_device_add 4 0x27 smb_debugcardcpld  # SMB DEBUGCARD CPLD
 # # Bus 13
 i2c_device_add 13 0x35 iobfpga #IOB FPGA
 
@@ -62,6 +70,11 @@ i2c_device_add 5 0x36 ucd90160		  # Power Sequence
 i2c_device_add 8 0x51 24c64
 i2c_device_add 8 0x4a lm75
 
+# net_brcm driver only support DVT1 and later
+if [ "$BOARD_VER" -gt 66 ];then
+    i2c_device_add 29 0x47 net_brcm
+fi
+
 # # i2c-mux PCA9548 0x70, channel 1, mux PCA9548 0x71
 i2c_device_add 48 0x58 psu_driver
 i2c_device_add 49 0x5a psu_driver
@@ -70,7 +83,12 @@ i2c_device_add 50 0x52 24c64 	#SIM
 i2c_device_add 51 0x48 tmp75
 i2c_device_add 52 0x49 tmp75
 i2c_device_add 54 0x21 pca9534	#PCA9534
-i2c_device_add 53 0x60 smb_pwrcpld 	#PDB-L
+if i2cget -y -f 55 0x60 > /dev/null;then
+    i2c_device_add 55 0x60 smb_pwrcpld 	#PDB-L
+else
+    i2c_device_add 53 0x60 smb_pwrcpld 	#PDB-L
+fi
+
 # # i2c-mux PCA9548 0x70, channel 2, mux PCA9548 0x72
 i2c_device_add 56 0x58 psu_driver 	#PSU4
 i2c_device_add 57 0x5a psu_driver 	#PSU3
@@ -78,7 +96,11 @@ i2c_device_add 57 0x5a psu_driver 	#PSU3
 i2c_device_add 59 0x48 tmp75
 i2c_device_add 60 0x49 tmp75
 i2c_device_add 62 0x21 pca9534
-i2c_device_add 61 0x60 smb_pwrcpld  #PDB-R
+if i2cget -y -f 63 0x60 > /dev/null;then
+    i2c_device_add 63 0x60 smb_pwrcpld 	#PDB-R
+else
+    i2c_device_add 61 0x60 smb_pwrcpld  #PDB-R
+fi
 
 # # i2c-mux PCA9548 0x70, channel 3, mux PCA9548 0x76
 i2c_device_add 64 0x33	fcbcpld #CPLD
@@ -194,4 +216,4 @@ i2c_device_add 12 0x3e smb_syscpld     # SYSTEM CPLD
 # of devices and # of devices without drivers) will be dumped at the end
 # of this function.
 #
-i2c_check_driver_binding
+i2c_check_driver_binding "fix-binding"

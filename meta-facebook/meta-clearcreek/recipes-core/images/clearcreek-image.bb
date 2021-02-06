@@ -30,4 +30,14 @@ IMAGE_INSTALL += " \
   ipmbd \
   ipmb-util\
   power-util \
+  fruid \
+  mac-util \
+  ipmitool \
+  gpiod \
+  sensor-util \
+  sensor-mon \
+  vboot-utils \
+  fscd \
+  guid-util \
+  fpc-util \
   "

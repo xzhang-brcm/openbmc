@@ -25,6 +25,7 @@
 #include <syslog.h>
 #include <openbmc/libgpio.h>
 #include <openbmc/obmc-sensors.h>
+#include <openbmc/obmc-i2c.h>
 #include <switchtec/switchtec.h>
 #include <facebook/asic.h>
 #include "pal.h"
@@ -57,6 +58,7 @@ static int sensors_read_vr(uint8_t, float*);
 static int sensors_read_12v_hsc(uint8_t, float*);
 static int sensors_read_12v_hsc_vout(uint8_t, float*);
 static int sensors_read_48v_hsc(uint8_t, float*);
+static int sensors_read_48v_hsc_vout(uint8_t, float*);
 static int read_gpu_temp(uint8_t, float*);
 static int read_asic_board_temp(uint8_t, float*);
 static int read_asic_mem_temp(uint8_t, float*);
@@ -103,38 +105,6 @@ const uint8_t mb_sensor_list[] = {
   MB_SWITCH_PAX1_DIE_TEMP,
   MB_SWITCH_PAX2_DIE_TEMP,
   MB_SWITCH_PAX3_DIE_TEMP,
-  MB_GPU0_TEMP,
-  MB_GPU1_TEMP,
-  MB_GPU2_TEMP,
-  MB_GPU3_TEMP,
-  MB_GPU4_TEMP,
-  MB_GPU5_TEMP,
-  MB_GPU6_TEMP,
-  MB_GPU7_TEMP,
-  MB_GPU0_EDGE_TEMP,
-  MB_GPU1_EDGE_TEMP,
-  MB_GPU2_EDGE_TEMP,
-  MB_GPU3_EDGE_TEMP,
-  MB_GPU4_EDGE_TEMP,
-  MB_GPU5_EDGE_TEMP,
-  MB_GPU6_EDGE_TEMP,
-  MB_GPU7_EDGE_TEMP,
-  MB_GPU0_HBM_TEMP,
-  MB_GPU1_HBM_TEMP,
-  MB_GPU2_HBM_TEMP,
-  MB_GPU3_HBM_TEMP,
-  MB_GPU4_HBM_TEMP,
-  MB_GPU5_HBM_TEMP,
-  MB_GPU6_HBM_TEMP,
-  MB_GPU7_HBM_TEMP,
-  MB_GPU0_PWCS,
-  MB_GPU1_PWCS,
-  MB_GPU2_PWCS,
-  MB_GPU3_PWCS,
-  MB_GPU4_PWCS,
-  MB_GPU5_PWCS,
-  MB_GPU6_PWCS,
-  MB_GPU7_PWCS,
   MB_VR_P0V8_VDD0_VIN,
   MB_VR_P0V8_VDD0_VOUT,
   MB_VR_P0V8_VDD0_CURR,
@@ -174,22 +144,27 @@ const uint8_t pdb_sensor_list[] = {
   PDB_HSC_P12V_1_VOUT,
   PDB_HSC_P12V_1_CURR,
   PDB_HSC_P12V_1_PWR,
+  PDB_HSC_P12V_1_PWR_PEAK,
   PDB_HSC_P12V_2_VIN,
   PDB_HSC_P12V_2_VOUT,
   PDB_HSC_P12V_2_CURR,
   PDB_HSC_P12V_2_PWR,
+  PDB_HSC_P12V_2_PWR_PEAK,
   PDB_HSC_P12V_AUX_VIN,
   PDB_HSC_P12V_AUX_VOUT,
   PDB_HSC_P12V_AUX_CURR,
   PDB_HSC_P12V_AUX_PWR,
+  PDB_HSC_P12V_AUX_PWR_PEAK,
   PDB_HSC_P48V_1_VIN,
   PDB_HSC_P48V_1_VOUT,
   PDB_HSC_P48V_1_CURR,
   PDB_HSC_P48V_1_PWR,
+  PDB_HSC_P48V_1_PWR_PEAK,
   PDB_HSC_P48V_2_VIN,
   PDB_HSC_P48V_2_VOUT,
   PDB_HSC_P48V_2_CURR,
   PDB_HSC_P48V_2_PWR,
+  PDB_HSC_P48V_2_PWR_PEAK,
   PDB_ADC_1_VICOR0_TEMP,
   PDB_ADC_1_VICOR1_TEMP,
   PDB_ADC_1_VICOR2_TEMP,
@@ -200,6 +175,62 @@ const uint8_t pdb_sensor_list[] = {
   PDB_ADC_2_VICOR3_TEMP,
   PDB_SENSOR_OUTLET_TEMP,
   PDB_SENSOR_OUTLET_TEMP_REMOTE
+};
+
+const uint8_t asic0_sensor_list[] = {
+  MB_GPU0_TEMP,
+  MB_GPU0_EDGE_TEMP,
+  MB_GPU0_HBM_TEMP,
+  MB_GPU0_PWCS,
+};
+
+const uint8_t asic1_sensor_list[] = {
+  MB_GPU1_TEMP,
+  MB_GPU1_EDGE_TEMP,
+  MB_GPU1_HBM_TEMP,
+  MB_GPU1_PWCS,
+};
+
+const uint8_t asic2_sensor_list[] = {
+  MB_GPU2_TEMP,
+  MB_GPU2_EDGE_TEMP,
+  MB_GPU2_HBM_TEMP,
+  MB_GPU2_PWCS,
+};
+
+const uint8_t asic3_sensor_list[] = {
+  MB_GPU3_TEMP,
+  MB_GPU3_EDGE_TEMP,
+  MB_GPU3_HBM_TEMP,
+  MB_GPU3_PWCS,
+};
+
+const uint8_t asic4_sensor_list[] = {
+  MB_GPU4_TEMP,
+  MB_GPU4_EDGE_TEMP,
+  MB_GPU4_HBM_TEMP,
+  MB_GPU4_PWCS,
+};
+
+const uint8_t asic5_sensor_list[] = {
+  MB_GPU5_TEMP,
+  MB_GPU5_EDGE_TEMP,
+  MB_GPU5_HBM_TEMP,
+  MB_GPU5_PWCS,
+};
+
+const uint8_t asic6_sensor_list[] = {
+  MB_GPU6_TEMP,
+  MB_GPU6_EDGE_TEMP,
+  MB_GPU6_HBM_TEMP,
+  MB_GPU6_PWCS,
+};
+
+const uint8_t asic7_sensor_list[] = {
+  MB_GPU7_TEMP,
+  MB_GPU7_EDGE_TEMP,
+  MB_GPU7_HBM_TEMP,
+  MB_GPU7_PWCS,
 };
 
 float sensors_threshold[MAX_SENSOR_NUM][MAX_SENSOR_THRESHOLD + 1] = {
@@ -383,13 +414,13 @@ float sensors_threshold[MAX_SENSOR_NUM][MAX_SENSOR_THRESHOLD + 1] = {
   [MB_VR_P1V0_AVD3_VIN] =
   {0,	13.2,	13,	0,	10.8,	0,	0,	0,	0},
   [MB_VR_P1V0_AVD0_VOUT] =
-  {0,	1.025,	0,	0,	0.975,	0,	0,	0,	0},
+  {0,	0.861,	0,	0,	0.819,	0,	0,	0,	0},
   [MB_VR_P1V0_AVD1_VOUT] =
-  {0,	1.025,	0,	0,	0.975,	0,	0,	0,	0},
+  {0,	0.861,	0,	0,	0.819,	0,	0,	0,	0},
   [MB_VR_P1V0_AVD2_VOUT] =
-  {0,	1.025,	0,	0,	0.975,	0,	0,	0,	0},
+  {0,	0.861,	0,	0,	0.819,	0,	0,	0,	0},
   [MB_VR_P1V0_AVD3_VOUT] =
-  {0,	1.025,	0,	0,	0.975,	0,	0,	0,	0},
+  {0,	0.861,	0,	0,	0.819,	0,	0,	0,	0},
   [MB_VR_P1V0_AVD0_CURR] =
   {0,	24.0,	0,	0,	0,	0,	0,	0,	0},
   [MB_VR_P1V0_AVD1_CURR] =
@@ -474,342 +505,360 @@ struct sensor_map {
   int unit;
 } fbep_sensors_map[] = {
   [MB_FAN0_TACH_I] =
-  {sensors_read_fan_speed, "MB_FAN0_TACH_I", SNR_TACH},
+  {sensors_read_fan_speed, "EP_MB_FAN0_TACH_I", SNR_TACH},
   [MB_FAN0_TACH_O] =
-  {sensors_read_fan_speed, "MB_FAN0_TACH_O", SNR_TACH},
+  {sensors_read_fan_speed, "EP_MB_FAN0_TACH_O", SNR_TACH},
   [MB_FAN1_TACH_I] =
-  {sensors_read_fan_speed, "MB_FAN1_TACH_I", SNR_TACH},
+  {sensors_read_fan_speed, "EP_MB_FAN1_TACH_I", SNR_TACH},
   [MB_FAN1_TACH_O] =
-  {sensors_read_fan_speed, "MB_FAN1_TACH_O", SNR_TACH},
+  {sensors_read_fan_speed, "EP_MB_FAN1_TACH_O", SNR_TACH},
   [MB_FAN2_TACH_I] =
-  {sensors_read_fan_speed, "MB_FAN2_TACH_I", SNR_TACH},
+  {sensors_read_fan_speed, "EP_MB_FAN2_TACH_I", SNR_TACH},
   [MB_FAN2_TACH_O] =
-  {sensors_read_fan_speed, "MB_FAN2_TACH_O", SNR_TACH},
+  {sensors_read_fan_speed, "EP_MB_FAN2_TACH_O", SNR_TACH},
   [MB_FAN3_TACH_I] =
-  {sensors_read_fan_speed, "MB_FAN3_TACH_I", SNR_TACH},
+  {sensors_read_fan_speed, "EP_MB_FAN3_TACH_I", SNR_TACH},
   [MB_FAN3_TACH_O] =
-  {sensors_read_fan_speed, "MB_FAN3_TACH_O", SNR_TACH},
+  {sensors_read_fan_speed, "EP_MB_FAN3_TACH_O", SNR_TACH},
   [MB_FAN0_VOLT] =
-  {sensors_read_fan_health, "MB_FAN0_VOLT", SNR_VOLT},
+  {sensors_read_fan_health, "EP_MB_FAN0_VOLT", SNR_VOLT},
   [MB_FAN1_VOLT] =
-  {sensors_read_fan_health, "MB_FAN1_VOLT", SNR_VOLT},
+  {sensors_read_fan_health, "EP_MB_FAN1_VOLT", SNR_VOLT},
   [MB_FAN2_VOLT] =
-  {sensors_read_fan_health, "MB_FAN2_VOLT", SNR_VOLT},
+  {sensors_read_fan_health, "EP_MB_FAN2_VOLT", SNR_VOLT},
   [MB_FAN3_VOLT] =
-  {sensors_read_fan_health, "MB_FAN3_VOLT", SNR_VOLT},
+  {sensors_read_fan_health, "EP_MB_FAN3_VOLT", SNR_VOLT},
   [MB_FAN0_CURR] =
-  {sensors_read_fan_health, "MB_FAN0_CURR", SNR_CURR},
+  {sensors_read_fan_health, "EP_MB_FAN0_CURR", SNR_CURR},
   [MB_FAN1_CURR] =
-  {sensors_read_fan_health, "MB_FAN1_CURR", SNR_CURR},
+  {sensors_read_fan_health, "EP_MB_FAN1_CURR", SNR_CURR},
   [MB_FAN2_CURR] =
-  {sensors_read_fan_health, "MB_FAN2_CURR", SNR_CURR},
+  {sensors_read_fan_health, "EP_MB_FAN2_CURR", SNR_CURR},
   [MB_FAN3_CURR] =
-  {sensors_read_fan_health, "MB_FAN3_CURR", SNR_CURR},
+  {sensors_read_fan_health, "EP_MB_FAN3_CURR", SNR_CURR},
   [MB_ADC_P12V_AUX] =
-  {sensors_read_common_adc, "MB_ADC_P12V_AUX", SNR_VOLT},
+  {sensors_read_common_adc, "EP_MB_ADC_P12V_AUX", SNR_VOLT},
   [MB_ADC_P12V_1] =
-  {sensors_read_12v_adc, "MB_ADC_P12V_1", SNR_VOLT},
+  {sensors_read_12v_adc, "EP_MB_ADC_P12V_1", SNR_VOLT},
   [MB_ADC_P12V_2] =
-  {sensors_read_12v_adc, "MB_ADC_P12V_2", SNR_VOLT},
+  {sensors_read_12v_adc, "EP_MB_ADC_P12V_2", SNR_VOLT},
   [MB_ADC_P3V3_STBY] =
-  {sensors_read_common_adc, "MB_ADC_P3V3_STBY", SNR_VOLT},
+  {sensors_read_common_adc, "EP_MB_ADC_P3V3_STBY", SNR_VOLT},
   [MB_ADC_P3V3] =
-  {sensors_read_12v_adc, "MB_ADC_P3V3", SNR_VOLT},
+  {sensors_read_12v_adc, "EP_MB_ADC_P3V3", SNR_VOLT},
   [MB_ADC_P3V_BAT] =
-  {read_battery_value, "MB_ADC_P3V_BAT", SNR_VOLT},
+  {read_battery_value, "EP_MB_ADC_P3V_BAT", SNR_VOLT},
   [MB_ADC_P5V_STBY] =
-  {sensors_read_common_adc, "MB_ADC_P5V_STBY", SNR_VOLT},
+  {sensors_read_common_adc, "EP_MB_ADC_P5V_STBY", SNR_VOLT},
   [MB_SENSOR_GPU_INLET] =
-  {sensors_read_common_therm, "MB_SENSOR_GPU_INLET", SNR_TEMP},
+  {sensors_read_common_therm, "EP_MB_SENSOR_GPU_INLET", SNR_TEMP},
   [MB_SENSOR_GPU_INLET_REMOTE] =
-  {sensors_read_common_therm, "MB_SENSOR_GPU_INLET_REMOTE", SNR_TEMP},
+  {sensors_read_common_therm, "EP_MB_SENSOR_GPU_INLET_REMOTE", SNR_TEMP},
   [MB_SENSOR_GPU_OUTLET] =
-  {sensors_read_common_therm, "MB_SENSOR_GPU_OUTLET", SNR_TEMP},
+  {sensors_read_common_therm, "EP_MB_SENSOR_GPU_OUTLET", SNR_TEMP},
   [MB_SENSOR_GPU_OUTLET_REMOTE] =
-  {sensors_read_common_therm, "MB_SENSOR_GPU_OUTLET_REMOTE", SNR_TEMP},
+  {sensors_read_common_therm, "EP_MB_SENSOR_GPU_OUTLET_REMOTE", SNR_TEMP},
   [MB_SENSOR_PAX01_THERM] =
-  {sensors_read_pax_therm, "MB_SENSOR_PAX01_THERM", SNR_TEMP},
+  {sensors_read_pax_therm, "EP_MB_SENSOR_PAX01_THERM", SNR_TEMP},
   [MB_SENSOR_PAX23_THERM] =
-  {sensors_read_pax_therm, "MB_SENSOR_PAX23_THERM", SNR_TEMP},
+  {sensors_read_pax_therm, "EP_MB_SENSOR_PAX23_THERM", SNR_TEMP},
   [MB_SENSOR_PAX0_THERM_REMOTE] =
-  {sensors_read_pax_therm, "MB_SENSOR_PAX0_THERM", SNR_TEMP},
+  {sensors_read_pax_therm, "EP_MB_SENSOR_PAX0_THERM", SNR_TEMP},
   [MB_SENSOR_PAX1_THERM_REMOTE] =
-  {sensors_read_pax_therm, "MB_SENSOR_PAX1_THERM", SNR_TEMP},
+  {sensors_read_pax_therm, "EP_MB_SENSOR_PAX1_THERM", SNR_TEMP},
   [MB_SENSOR_PAX2_THERM_REMOTE] =
-  {sensors_read_pax_therm, "MB_SENSOR_PAX2_THERM", SNR_TEMP},
+  {sensors_read_pax_therm, "EP_MB_SENSOR_PAX2_THERM", SNR_TEMP},
   [MB_SENSOR_PAX3_THERM_REMOTE] =
-  {sensors_read_pax_therm, "MB_SENSOR_PAX3_THERM", SNR_TEMP},
+  {sensors_read_pax_therm, "EP_MB_SENSOR_PAX3_THERM", SNR_TEMP},
   [MB_SWITCH_PAX0_DIE_TEMP] =
-  {pal_read_pax_dietemp, "MB_SWITCH_PAX0_DIE_TEMP", SNR_TEMP},
+  {pal_read_pax_dietemp, "EP_MB_SWITCH_PAX0_DIE_TEMP", SNR_TEMP},
   [MB_SWITCH_PAX1_DIE_TEMP] =
-  {pal_read_pax_dietemp, "MB_SWITCH_PAX1_DIE_TEMP", SNR_TEMP},
+  {pal_read_pax_dietemp, "EP_MB_SWITCH_PAX1_DIE_TEMP", SNR_TEMP},
   [MB_SWITCH_PAX2_DIE_TEMP] =
-  {pal_read_pax_dietemp, "MB_SWITCH_PAX2_DIE_TEMP", SNR_TEMP},
+  {pal_read_pax_dietemp, "EP_MB_SWITCH_PAX2_DIE_TEMP", SNR_TEMP},
   [MB_SWITCH_PAX3_DIE_TEMP] =
-  {pal_read_pax_dietemp, "MB_SWITCH_PAX3_DIE_TEMP", SNR_TEMP},
+  {pal_read_pax_dietemp, "EP_MB_SWITCH_PAX3_DIE_TEMP", SNR_TEMP},
   [MB_GPU0_TEMP] =
-  {read_gpu_temp, "MB_GPU0_TEMP", SNR_TEMP},
+  {read_gpu_temp, "EP_MB_GPU0_TEMP", SNR_TEMP},
   [MB_GPU1_TEMP] =
-  {read_gpu_temp, "MB_GPU1_TEMP", SNR_TEMP},
+  {read_gpu_temp, "EP_MB_GPU1_TEMP", SNR_TEMP},
   [MB_GPU2_TEMP] =
-  {read_gpu_temp, "MB_GPU2_TEMP", SNR_TEMP},
+  {read_gpu_temp, "EP_MB_GPU2_TEMP", SNR_TEMP},
   [MB_GPU3_TEMP] =
-  {read_gpu_temp, "MB_GPU3_TEMP", SNR_TEMP},
+  {read_gpu_temp, "EP_MB_GPU3_TEMP", SNR_TEMP},
   [MB_GPU4_TEMP] =
-  {read_gpu_temp, "MB_GPU4_TEMP", SNR_TEMP},
+  {read_gpu_temp, "EP_MB_GPU4_TEMP", SNR_TEMP},
   [MB_GPU5_TEMP] =
-  {read_gpu_temp, "MB_GPU5_TEMP", SNR_TEMP},
+  {read_gpu_temp, "EP_MB_GPU5_TEMP", SNR_TEMP},
   [MB_GPU6_TEMP] =
-  {read_gpu_temp, "MB_GPU6_TEMP", SNR_TEMP},
+  {read_gpu_temp, "EP_MB_GPU6_TEMP", SNR_TEMP},
   [MB_GPU7_TEMP] =
-  {read_gpu_temp, "MB_GPU7_TEMP", SNR_TEMP},
+  {read_gpu_temp, "EP_MB_GPU7_TEMP", SNR_TEMP},
   [MB_GPU0_EDGE_TEMP] =
-  {read_asic_board_temp, "MB_GPU0_EDGE_TEMP", SNR_TEMP},
+  {read_asic_board_temp, "EP_MB_GPU0_EDGE_TEMP", SNR_TEMP},
   [MB_GPU1_EDGE_TEMP] =
-  {read_asic_board_temp, "MB_GPU1_EDGE_TEMP", SNR_TEMP},
+  {read_asic_board_temp, "EP_MB_GPU1_EDGE_TEMP", SNR_TEMP},
   [MB_GPU2_EDGE_TEMP] =
-  {read_asic_board_temp, "MB_GPU2_EDGE_TEMP", SNR_TEMP},
+  {read_asic_board_temp, "EP_MB_GPU2_EDGE_TEMP", SNR_TEMP},
   [MB_GPU3_EDGE_TEMP] =
-  {read_asic_board_temp, "MB_GPU3_EDGE_TEMP", SNR_TEMP},
+  {read_asic_board_temp, "EP_MB_GPU3_EDGE_TEMP", SNR_TEMP},
   [MB_GPU4_EDGE_TEMP] =
-  {read_asic_board_temp, "MB_GPU4_EDGE_TEMP", SNR_TEMP},
+  {read_asic_board_temp, "EP_MB_GPU4_EDGE_TEMP", SNR_TEMP},
   [MB_GPU5_EDGE_TEMP] =
-  {read_asic_board_temp, "MB_GPU5_EDGE_TEMP", SNR_TEMP},
+  {read_asic_board_temp, "EP_MB_GPU5_EDGE_TEMP", SNR_TEMP},
   [MB_GPU6_EDGE_TEMP] =
-  {read_asic_board_temp, "MB_GPU6_EDGE_TEMP", SNR_TEMP},
+  {read_asic_board_temp, "EP_MB_GPU6_EDGE_TEMP", SNR_TEMP},
   [MB_GPU7_EDGE_TEMP] =
-  {read_asic_board_temp, "MB_GPU7_EDGE_TEMP", SNR_TEMP},
+  {read_asic_board_temp, "EP_MB_GPU7_EDGE_TEMP", SNR_TEMP},
   [MB_GPU0_HBM_TEMP] =
-  {read_asic_mem_temp, "MB_GPU0_HBM_TEMP", SNR_TEMP},
+  {read_asic_mem_temp, "EP_MB_GPU0_HBM_TEMP", SNR_TEMP},
   [MB_GPU1_HBM_TEMP] =
-  {read_asic_mem_temp, "MB_GPU1_HBM_TEMP", SNR_TEMP},
+  {read_asic_mem_temp, "EP_MB_GPU1_HBM_TEMP", SNR_TEMP},
   [MB_GPU2_HBM_TEMP] =
-  {read_asic_mem_temp, "MB_GPU2_HBM_TEMP", SNR_TEMP},
+  {read_asic_mem_temp, "EP_MB_GPU2_HBM_TEMP", SNR_TEMP},
   [MB_GPU3_HBM_TEMP] =
-  {read_asic_mem_temp, "MB_GPU3_HBM_TEMP", SNR_TEMP},
+  {read_asic_mem_temp, "EP_MB_GPU3_HBM_TEMP", SNR_TEMP},
   [MB_GPU4_HBM_TEMP] =
-  {read_asic_mem_temp, "MB_GPU4_HBM_TEMP", SNR_TEMP},
+  {read_asic_mem_temp, "EP_MB_GPU4_HBM_TEMP", SNR_TEMP},
   [MB_GPU5_HBM_TEMP] =
-  {read_asic_mem_temp, "MB_GPU5_HBM_TEMP", SNR_TEMP},
+  {read_asic_mem_temp, "EP_MB_GPU5_HBM_TEMP", SNR_TEMP},
   [MB_GPU6_HBM_TEMP] =
-  {read_asic_mem_temp, "MB_GPU6_HBM_TEMP", SNR_TEMP},
+  {read_asic_mem_temp, "EP_MB_GPU6_HBM_TEMP", SNR_TEMP},
   [MB_GPU7_HBM_TEMP] =
-  {read_asic_mem_temp, "MB_GPU7_HBM_TEMP", SNR_TEMP},
+  {read_asic_mem_temp, "EP_MB_GPU7_HBM_TEMP", SNR_TEMP},
   [MB_GPU0_PWCS] =
-  {read_gpu_pwcs, "MB_GPU0_PWCS", SNR_PWR},
+  {read_gpu_pwcs, "EP_MB_GPU0_PWCS", SNR_PWR},
   [MB_GPU1_PWCS] =
-  {read_gpu_pwcs, "MB_GPU1_PWCS", SNR_PWR},
+  {read_gpu_pwcs, "EP_MB_GPU1_PWCS", SNR_PWR},
   [MB_GPU2_PWCS] =
-  {read_gpu_pwcs, "MB_GPU2_PWCS", SNR_PWR},
+  {read_gpu_pwcs, "EP_MB_GPU2_PWCS", SNR_PWR},
   [MB_GPU3_PWCS] =
-  {read_gpu_pwcs, "MB_GPU3_PWCS", SNR_PWR},
+  {read_gpu_pwcs, "EP_MB_GPU3_PWCS", SNR_PWR},
   [MB_GPU4_PWCS] =
-  {read_gpu_pwcs, "MB_GPU4_PWCS", SNR_PWR},
+  {read_gpu_pwcs, "EP_MB_GPU4_PWCS", SNR_PWR},
   [MB_GPU5_PWCS] =
-  {read_gpu_pwcs, "MB_GPU5_PWCS", SNR_PWR},
+  {read_gpu_pwcs, "EP_MB_GPU5_PWCS", SNR_PWR},
   [MB_GPU6_PWCS] =
-  {read_gpu_pwcs, "MB_GPU6_PWCS", SNR_PWR},
+  {read_gpu_pwcs, "EP_MB_GPU6_PWCS", SNR_PWR},
   [MB_GPU7_PWCS] =
-  {read_gpu_pwcs, "MB_GPU7_PWCS", SNR_PWR},
+  {read_gpu_pwcs, "EP_MB_GPU7_PWCS", SNR_PWR},
   [MB_VR_P0V8_VDD0_VIN] =
-  {sensors_read_vr, "MB_VR_P0V8_VDD0_VIN", SNR_VOLT},
+  {sensors_read_vr, "EP_MB_VR_P0V8_VDD0_VIN", SNR_VOLT},
   [MB_VR_P0V8_VDD1_VIN] =
-  {sensors_read_vr, "MB_VR_P0V8_VDD1_VIN", SNR_VOLT},
+  {sensors_read_vr, "EP_MB_VR_P0V8_VDD1_VIN", SNR_VOLT},
   [MB_VR_P0V8_VDD2_VIN] =
-  {sensors_read_vr, "MB_VR_P0V8_VDD2_VIN", SNR_VOLT},
+  {sensors_read_vr, "EP_MB_VR_P0V8_VDD2_VIN", SNR_VOLT},
   [MB_VR_P0V8_VDD3_VIN] =
-  {sensors_read_vr, "MB_VR_P0V8_VDD3_VIN", SNR_VOLT},
+  {sensors_read_vr, "EP_MB_VR_P0V8_VDD3_VIN", SNR_VOLT},
   [MB_VR_P0V8_VDD0_VOUT] =
-  {sensors_read_vr, "MB_VR_P0V8_VDD0_VOUT", SNR_VOLT},
+  {sensors_read_vr, "EP_MB_VR_P0V8_VDD0_VOUT", SNR_VOLT},
   [MB_VR_P0V8_VDD1_VOUT] =
-  {sensors_read_vr, "MB_VR_P0V8_VDD1_VOUT", SNR_VOLT},
+  {sensors_read_vr, "EP_MB_VR_P0V8_VDD1_VOUT", SNR_VOLT},
   [MB_VR_P0V8_VDD2_VOUT] =
-  {sensors_read_vr, "MB_VR_P0V8_VDD2_VOUT", SNR_VOLT},
+  {sensors_read_vr, "EP_MB_VR_P0V8_VDD2_VOUT", SNR_VOLT},
   [MB_VR_P0V8_VDD3_VOUT] =
-  {sensors_read_vr, "MB_VR_P0V8_VDD3_VOUT", SNR_VOLT},
+  {sensors_read_vr, "EP_MB_VR_P0V8_VDD3_VOUT", SNR_VOLT},
   [MB_VR_P0V8_VDD0_CURR] =
-  {sensors_read_vr, "MB_VR_P0V8_VDD0_CURR", SNR_CURR},
+  {sensors_read_vr, "EP_MB_VR_P0V8_VDD0_CURR", SNR_CURR},
   [MB_VR_P0V8_VDD1_CURR] =
-  {sensors_read_vr, "MB_VR_P0V8_VDD1_CURR", SNR_CURR},
+  {sensors_read_vr, "EP_MB_VR_P0V8_VDD1_CURR", SNR_CURR},
   [MB_VR_P0V8_VDD2_CURR] =
-  {sensors_read_vr, "MB_VR_P0V8_VDD2_CURR", SNR_CURR},
+  {sensors_read_vr, "EP_MB_VR_P0V8_VDD2_CURR", SNR_CURR},
   [MB_VR_P0V8_VDD3_CURR] =
-  {sensors_read_vr, "MB_VR_P0V8_VDD3_CURR", SNR_CURR},
+  {sensors_read_vr, "EP_MB_VR_P0V8_VDD3_CURR", SNR_CURR},
   [MB_VR_P0V8_VDD0_TEMP] =
-  {sensors_read_vr, "MB_VR_P0V8_VDD0_TEMP", SNR_TEMP},
+  {sensors_read_vr, "EP_MB_VR_P0V8_VDD0_TEMP", SNR_TEMP},
   [MB_VR_P0V8_VDD1_TEMP] =
-  {sensors_read_vr, "MB_VR_P0V8_VDD1_TEMP", SNR_TEMP},
+  {sensors_read_vr, "EP_MB_VR_P0V8_VDD1_TEMP", SNR_TEMP},
   [MB_VR_P0V8_VDD2_TEMP] =
-  {sensors_read_vr, "MB_VR_P0V8_VDD2_TEMP", SNR_TEMP},
+  {sensors_read_vr, "EP_MB_VR_P0V8_VDD2_TEMP", SNR_TEMP},
   [MB_VR_P0V8_VDD3_TEMP] =
-  {sensors_read_vr, "MB_VR_P0V8_VDD3_TEMP", SNR_TEMP},
+  {sensors_read_vr, "EP_MB_VR_P0V8_VDD3_TEMP", SNR_TEMP},
   [MB_VR_P1V0_AVD0_VIN] =
-  {sensors_read_vr, "MB_VR_P1V0_AVD0_VIN", SNR_VOLT},
+  {sensors_read_vr, "EP_MB_VR_P1V0_AVD0_VIN", SNR_VOLT},
   [MB_VR_P1V0_AVD1_VIN] =
-  {sensors_read_vr, "MB_VR_P1V0_AVD1_VIN", SNR_VOLT},
+  {sensors_read_vr, "EP_MB_VR_P1V0_AVD1_VIN", SNR_VOLT},
   [MB_VR_P1V0_AVD2_VIN] =
-  {sensors_read_vr, "MB_VR_P1V0_AVD2_VIN", SNR_VOLT},
+  {sensors_read_vr, "EP_MB_VR_P1V0_AVD2_VIN", SNR_VOLT},
   [MB_VR_P1V0_AVD3_VIN] =
-  {sensors_read_vr, "MB_VR_P1V0_AVD3_VIN", SNR_VOLT},
+  {sensors_read_vr, "EP_MB_VR_P1V0_AVD3_VIN", SNR_VOLT},
   [MB_VR_P1V0_AVD0_VOUT] =
-  {sensors_read_vr, "MB_VR_P1V0_AVD0_VOUT", SNR_VOLT},
+  {sensors_read_vr, "EP_MB_VR_P1V0_AVD0_VOUT", SNR_VOLT},
   [MB_VR_P1V0_AVD1_VOUT] =
-  {sensors_read_vr, "MB_VR_P1V0_AVD1_VOUT", SNR_VOLT},
+  {sensors_read_vr, "EP_MB_VR_P1V0_AVD1_VOUT", SNR_VOLT},
   [MB_VR_P1V0_AVD2_VOUT] =
-  {sensors_read_vr, "MB_VR_P1V0_AVD2_VOUT", SNR_VOLT},
+  {sensors_read_vr, "EP_MB_VR_P1V0_AVD2_VOUT", SNR_VOLT},
   [MB_VR_P1V0_AVD3_VOUT] =
-  {sensors_read_vr, "MB_VR_P1V0_AVD3_VOUT", SNR_VOLT},
+  {sensors_read_vr, "EP_MB_VR_P1V0_AVD3_VOUT", SNR_VOLT},
   [MB_VR_P1V0_AVD0_CURR] =
-  {sensors_read_vr, "MB_VR_P1V0_AVD0_CURR", SNR_CURR},
+  {sensors_read_vr, "EP_MB_VR_P1V0_AVD0_CURR", SNR_CURR},
   [MB_VR_P1V0_AVD1_CURR] =
-  {sensors_read_vr, "MB_VR_P1V0_AVD1_CURR", SNR_CURR},
+  {sensors_read_vr, "EP_MB_VR_P1V0_AVD1_CURR", SNR_CURR},
   [MB_VR_P1V0_AVD2_CURR] =
-  {sensors_read_vr, "MB_VR_P1V0_AVD2_CURR", SNR_CURR},
+  {sensors_read_vr, "EP_MB_VR_P1V0_AVD2_CURR", SNR_CURR},
   [MB_VR_P1V0_AVD3_CURR] =
-  {sensors_read_vr, "MB_VR_P1V0_AVD3_CURR", SNR_CURR},
+  {sensors_read_vr, "EP_MB_VR_P1V0_AVD3_CURR", SNR_CURR},
   [MB_VR_P1V0_AVD0_TEMP] =
-  {sensors_read_vr, "MB_VR_P1V0_AVD0_TEMP", SNR_TEMP},
+  {sensors_read_vr, "EP_MB_VR_P1V0_AVD0_TEMP", SNR_TEMP},
   [MB_VR_P1V0_AVD1_TEMP] =
-  {sensors_read_vr, "MB_VR_P1V0_AVD1_TEMP", SNR_TEMP},
+  {sensors_read_vr, "EP_MB_VR_P1V0_AVD1_TEMP", SNR_TEMP},
   [MB_VR_P1V0_AVD2_TEMP] =
-  {sensors_read_vr, "MB_VR_P1V0_AVD2_TEMP", SNR_TEMP},
+  {sensors_read_vr, "EP_MB_VR_P1V0_AVD2_TEMP", SNR_TEMP},
   [MB_VR_P1V0_AVD3_TEMP] =
-  {sensors_read_vr, "MB_VR_P1V0_AVD3_TEMP", SNR_TEMP},
+  {sensors_read_vr, "EP_MB_VR_P1V0_AVD3_TEMP", SNR_TEMP},
   [PDB_HSC_P12V_AUX_VIN] =
-  {sensors_read_12v_hsc, "PDB_HSC_P12V_AUX_VIN", SNR_VOLT},
+  {sensors_read_12v_hsc, "EP_PDB_HSC_P12V_AUX_VIN", SNR_VOLT},
   [PDB_HSC_P12V_1_VIN] =
-  {sensors_read_12v_hsc, "PDB_HSC_P12V_1_VIN", SNR_VOLT},
+  {sensors_read_12v_hsc, "EP_PDB_HSC_P12V_1_VIN", SNR_VOLT},
   [PDB_HSC_P12V_2_VIN] =
-  {sensors_read_12v_hsc, "PDB_HSC_P12V_2_VIN", SNR_VOLT},
+  {sensors_read_12v_hsc, "EP_PDB_HSC_P12V_2_VIN", SNR_VOLT},
   [PDB_HSC_P12V_AUX_VOUT] =
-  {sensors_read_12v_hsc, "PDB_HSC_P12V_AUX_VOUT", SNR_VOLT},
+  {sensors_read_12v_hsc, "EP_PDB_HSC_P12V_AUX_VOUT", SNR_VOLT},
   [PDB_HSC_P12V_1_VOUT] =
-  {sensors_read_12v_hsc_vout, "PDB_HSC_P12V_1_VOUT", SNR_VOLT},
+  {sensors_read_12v_hsc_vout, "EP_PDB_HSC_P12V_1_VOUT", SNR_VOLT},
   [PDB_HSC_P12V_2_VOUT] =
-  {sensors_read_12v_hsc_vout, "PDB_HSC_P12V_2_VOUT", SNR_VOLT},
+  {sensors_read_12v_hsc_vout, "EP_PDB_HSC_P12V_2_VOUT", SNR_VOLT},
   [PDB_HSC_P12V_AUX_CURR] =
-  {sensors_read_12v_hsc, "PDB_HSC_P12V_AUX_CURR", SNR_CURR},
+  {sensors_read_12v_hsc, "EP_PDB_HSC_P12V_AUX_CURR", SNR_CURR},
   [PDB_HSC_P12V_1_CURR] =
-  {sensors_read_12v_hsc, "PDB_HSC_P12V_1_CURR", SNR_CURR},
+  {sensors_read_12v_hsc, "EP_PDB_HSC_P12V_1_CURR", SNR_CURR},
   [PDB_HSC_P12V_2_CURR] =
-  {sensors_read_12v_hsc, "PDB_HSC_P12V_2_CURR", SNR_CURR},
+  {sensors_read_12v_hsc, "EP_PDB_HSC_P12V_2_CURR", SNR_CURR},
   [PDB_HSC_P12V_AUX_PWR] =
-  {sensors_read_12v_hsc, "PDB_HSC_P12V_AUX_PWR", SNR_PWR},
+  {sensors_read_12v_hsc, "EP_PDB_HSC_P12V_AUX_PWR", SNR_PWR},
+  [PDB_HSC_P12V_AUX_PWR_PEAK] =
+  {sensors_read_12v_hsc, "EP_PDB_HSC_P12V_AUX_PWR_PEAK", SNR_PWR},
   [PDB_HSC_P12V_1_PWR] =
-  {sensors_read_12v_hsc, "PDB_HSC_P12V_1_PWR", SNR_PWR},
+  {sensors_read_12v_hsc, "EP_PDB_HSC_P12V_1_PWR", SNR_PWR},
+  [PDB_HSC_P12V_1_PWR_PEAK] =
+  {sensors_read_12v_hsc, "EP_PDB_HSC_P12V_1_PWR_PEAK", SNR_PWR},
   [PDB_HSC_P12V_2_PWR] =
-  {sensors_read_12v_hsc, "PDB_HSC_P12V_2_PWR", SNR_PWR},
+  {sensors_read_12v_hsc, "EP_PDB_HSC_P12V_2_PWR", SNR_PWR},
+  [PDB_HSC_P12V_2_PWR_PEAK] =
+  {sensors_read_12v_hsc, "EP_PDB_HSC_P12V_2_PWR_PEAK", SNR_PWR},
   [PDB_HSC_P48V_1_VIN] =
-  {sensors_read_48v_hsc, "PDB_HSC_P48V_1_VIN", SNR_VOLT},
+  {sensors_read_48v_hsc, "EP_PDB_HSC_P48V_1_VIN", SNR_VOLT},
   [PDB_HSC_P48V_1_VOUT] =
-  {sensors_read_48v_hsc, "PDB_HSC_P48V_1_VOUT", SNR_VOLT},
+  {sensors_read_48v_hsc_vout, "EP_PDB_HSC_P48V_1_VOUT", SNR_VOLT},
   [PDB_HSC_P48V_1_CURR] =
-  {sensors_read_48v_hsc, "PDB_HSC_P48V_1_CURR", SNR_CURR},
+  {sensors_read_48v_hsc, "EP_PDB_HSC_P48V_1_CURR", SNR_CURR},
   [PDB_HSC_P48V_1_PWR] =
-  {sensors_read_48v_hsc, "PDB_HSC_P48V_1_PWR", SNR_PWR},
+  {sensors_read_48v_hsc, "EP_PDB_HSC_P48V_1_PWR", SNR_PWR},
+  [PDB_HSC_P48V_1_PWR_PEAK] =
+  {sensors_read_48v_hsc, "EP_PDB_HSC_P48V_1_PWR_PEAK", SNR_PWR},
   [PDB_HSC_P48V_2_VIN] =
-  {sensors_read_48v_hsc, "PDB_HSC_P48V_2_VIN", SNR_VOLT},
+  {sensors_read_48v_hsc, "EP_PDB_HSC_P48V_2_VIN", SNR_VOLT},
   [PDB_HSC_P48V_2_VOUT] =
-  {sensors_read_48v_hsc, "PDB_HSC_P48V_2_VOUT", SNR_VOLT},
+  {sensors_read_48v_hsc_vout, "EP_PDB_HSC_P48V_2_VOUT", SNR_VOLT},
   [PDB_HSC_P48V_2_CURR] =
-  {sensors_read_48v_hsc, "PDB_HSC_P48V_2_CURR", SNR_CURR},
+  {sensors_read_48v_hsc, "EP_PDB_HSC_P48V_2_CURR", SNR_CURR},
   [PDB_HSC_P48V_2_PWR] =
-  {sensors_read_48v_hsc, "PDB_HSC_P48V_2_PWR", SNR_PWR},
+  {sensors_read_48v_hsc, "EP_PDB_HSC_P48V_2_PWR", SNR_PWR},
+  [PDB_HSC_P48V_2_PWR_PEAK] =
+  {sensors_read_48v_hsc, "EP_PDB_HSC_P48V_2_PWR_PEAK", SNR_PWR},
   [PDB_ADC_1_VICOR0_TEMP] =
-  {sensors_read_vicor, "PDB_ADC_1_VICOR0_TEMP", SNR_TEMP},
+  {sensors_read_vicor, "EP_PDB_ADC_1_VICOR0_TEMP", SNR_TEMP},
   [PDB_ADC_1_VICOR1_TEMP] =
-  {sensors_read_vicor, "PDB_ADC_1_VICOR1_TEMP", SNR_TEMP},
+  {sensors_read_vicor, "EP_PDB_ADC_1_VICOR1_TEMP", SNR_TEMP},
   [PDB_ADC_1_VICOR2_TEMP] =
-  {sensors_read_vicor, "PDB_ADC_1_VICOR2_TEMP", SNR_TEMP},
+  {sensors_read_vicor, "EP_PDB_ADC_1_VICOR2_TEMP", SNR_TEMP},
   [PDB_ADC_1_VICOR3_TEMP] =
-  {sensors_read_vicor, "PDB_ADC_1_VICOR3_TEMP", SNR_TEMP},
+  {sensors_read_vicor, "EP_PDB_ADC_1_VICOR3_TEMP", SNR_TEMP},
   [PDB_ADC_2_VICOR0_TEMP] =
-  {sensors_read_vicor, "PDB_ADC_2_VICOR0_TEMP", SNR_TEMP},
+  {sensors_read_vicor, "EP_PDB_ADC_2_VICOR0_TEMP", SNR_TEMP},
   [PDB_ADC_2_VICOR1_TEMP] =
-  {sensors_read_vicor, "PDB_ADC_2_VICOR1_TEMP", SNR_TEMP},
+  {sensors_read_vicor, "EP_PDB_ADC_2_VICOR1_TEMP", SNR_TEMP},
   [PDB_ADC_2_VICOR2_TEMP] =
-  {sensors_read_vicor, "PDB_ADC_2_VICOR2_TEMP", SNR_TEMP},
+  {sensors_read_vicor, "EP_PDB_ADC_2_VICOR2_TEMP", SNR_TEMP},
   [PDB_ADC_2_VICOR3_TEMP] =
-  {sensors_read_vicor, "PDB_ADC_2_VICOR3_TEMP", SNR_TEMP},
+  {sensors_read_vicor, "EP_PDB_ADC_2_VICOR3_TEMP", SNR_TEMP},
   [PDB_SENSOR_OUTLET_TEMP] =
-  {sensors_read_common_therm, "PDB_SENSOR_OUTLET_TEMP", SNR_TEMP},
+  {sensors_read_common_therm, "EP_PDB_SENSOR_OUTLET", SNR_TEMP},
   [PDB_SENSOR_OUTLET_TEMP_REMOTE] =
-  {sensors_read_common_therm, "PDB_SENSOR_OUTLET_TEMP_REMOTE", SNR_TEMP},
+  {sensors_read_common_therm, "EP_PDB_SENSOR_OUTLET_REMOTE", SNR_TEMP},
 };
 
 static const char* asic_sensor_name_by_mfr[MFR_MAX_NUM][32] = {
   [GPU_AMD] = {
-    "MB_AMD_GPU0_TEMP",
-    "MB_AMD_GPU1_TEMP",
-    "MB_AMD_GPU2_TEMP",
-    "MB_AMD_GPU3_TEMP",
-    "MB_AMD_GPU4_TEMP",
-    "MB_AMD_GPU5_TEMP",
-    "MB_AMD_GPU6_TEMP",
-    "MB_AMD_GPU7_TEMP",
-    "MB_GPU0_EDGE_TEMP",
-    "MB_GPU1_EDGE_TEMP",
-    "MB_GPU2_EDGE_TEMP",
-    "MB_GPU3_EDGE_TEMP",
-    "MB_GPU4_EDGE_TEMP",
-    "MB_GPU5_EDGE_TEMP",
-    "MB_GPU6_EDGE_TEMP",
-    "MB_GPU7_EDGE_TEMP",
-    "MB_AMD_HBM0_TEMP",
-    "MB_AMD_HBM1_TEMP",
-    "MB_AMD_HBM2_TEMP",
-    "MB_AMD_HBM3_TEMP",
-    "MB_AMD_HBM4_TEMP",
-    "MB_AMD_HBM5_TEMP",
-    "MB_AMD_HBM6_TEMP",
-    "MB_AMD_HBM7_TEMP",
-    "MB_GPU0_PWCS",
-    "MB_GPU1_PWCS",
-    "MB_GPU2_PWCS",
-    "MB_GPU3_PWCS",
-    "MB_GPU4_PWCS",
-    "MB_GPU5_PWCS",
-    "MB_GPU6_PWCS",
-    "MB_GPU7_PWCS"
+    "EP_MB_AMD_GPU0_TEMP",
+    "EP_MB_AMD_GPU1_TEMP",
+    "EP_MB_AMD_GPU2_TEMP",
+    "EP_MB_AMD_GPU3_TEMP",
+    "EP_MB_AMD_GPU4_TEMP",
+    "EP_MB_AMD_GPU5_TEMP",
+    "EP_MB_AMD_GPU6_TEMP",
+    "EP_MB_AMD_GPU7_TEMP",
+    "EP_MB_GPU0_EDGE_TEMP",
+    "EP_MB_GPU1_EDGE_TEMP",
+    "EP_MB_GPU2_EDGE_TEMP",
+    "EP_MB_GPU3_EDGE_TEMP",
+    "EP_MB_GPU4_EDGE_TEMP",
+    "EP_MB_GPU5_EDGE_TEMP",
+    "EP_MB_GPU6_EDGE_TEMP",
+    "EP_MB_GPU7_EDGE_TEMP",
+    "EP_MB_AMD_HBM0_TEMP",
+    "EP_MB_AMD_HBM1_TEMP",
+    "EP_MB_AMD_HBM2_TEMP",
+    "EP_MB_AMD_HBM3_TEMP",
+    "EP_MB_AMD_HBM4_TEMP",
+    "EP_MB_AMD_HBM5_TEMP",
+    "EP_MB_AMD_HBM6_TEMP",
+    "EP_MB_AMD_HBM7_TEMP",
+    "EP_MB_GPU0_PWCS",
+    "EP_MB_GPU1_PWCS",
+    "EP_MB_GPU2_PWCS",
+    "EP_MB_GPU3_PWCS",
+    "EP_MB_GPU4_PWCS",
+    "EP_MB_GPU5_PWCS",
+    "EP_MB_GPU6_PWCS",
+    "EP_MB_GPU7_PWCS"
   },
-  [GPU_NV] = {
-    "MB_NVIDIA_GPU0_TEMP",
-    "MB_NVIDIA_GPU1_TEMP",
-    "MB_NVIDIA_GPU2_TEMP",
-    "MB_NVIDIA_GPU3_TEMP",
-    "MB_NVIDIA_GPU4_TEMP",
-    "MB_NVIDIA_GPU5_TEMP",
-    "MB_NVIDIA_GPU6_TEMP",
-    "MB_NVIDIA_GPU7_TEMP",
-    "MB_GPU0_EDGE_TEMP",
-    "MB_GPU1_EDGE_TEMP",
-    "MB_GPU2_EDGE_TEMP",
-    "MB_GPU3_EDGE_TEMP",
-    "MB_GPU4_EDGE_TEMP",
-    "MB_GPU5_EDGE_TEMP",
-    "MB_GPU6_EDGE_TEMP",
-    "MB_GPU7_EDGE_TEMP",
-    "MB_NVIDIA_HBM0_TEMP",
-    "MB_NVIDIA_HBM1_TEMP",
-    "MB_NVIDIA_HBM2_TEMP",
-    "MB_NVIDIA_HBM3_TEMP",
-    "MB_NVIDIA_HBM4_TEMP",
-    "MB_NVIDIA_HBM5_TEMP",
-    "MB_NVIDIA_HBM6_TEMP",
-    "MB_NVIDIA_HBM7_TEMP",
-    "MB_GPU0_PWCS",
-    "MB_GPU1_PWCS",
-    "MB_GPU2_PWCS",
-    "MB_GPU3_PWCS",
-    "MB_GPU4_PWCS",
-    "MB_GPU5_PWCS",
-    "MB_GPU6_PWCS",
-    "MB_GPU7_PWCS"
+  [GPU_NVIDIA] = {
+    "EP_MB_NVIDIA_GPU0_TEMP",
+    "EP_MB_NVIDIA_GPU1_TEMP",
+    "EP_MB_NVIDIA_GPU2_TEMP",
+    "EP_MB_NVIDIA_GPU3_TEMP",
+    "EP_MB_NVIDIA_GPU4_TEMP",
+    "EP_MB_NVIDIA_GPU5_TEMP",
+    "EP_MB_NVIDIA_GPU6_TEMP",
+    "EP_MB_NVIDIA_GPU7_TEMP",
+    "EP_MB_GPU0_EDGE_TEMP",
+    "EP_MB_GPU1_EDGE_TEMP",
+    "EP_MB_GPU2_EDGE_TEMP",
+    "EP_MB_GPU3_EDGE_TEMP",
+    "EP_MB_GPU4_EDGE_TEMP",
+    "EP_MB_GPU5_EDGE_TEMP",
+    "EP_MB_GPU6_EDGE_TEMP",
+    "EP_MB_GPU7_EDGE_TEMP",
+    "EP_MB_NVIDIA_HBM0_TEMP",
+    "EP_MB_NVIDIA_HBM1_TEMP",
+    "EP_MB_NVIDIA_HBM2_TEMP",
+    "EP_MB_NVIDIA_HBM3_TEMP",
+    "EP_MB_NVIDIA_HBM4_TEMP",
+    "EP_MB_NVIDIA_HBM5_TEMP",
+    "EP_MB_NVIDIA_HBM6_TEMP",
+    "EP_MB_NVIDIA_HBM7_TEMP",
+    "EP_MB_GPU0_PWCS",
+    "EP_MB_GPU1_PWCS",
+    "EP_MB_GPU2_PWCS",
+    "EP_MB_GPU3_PWCS",
+    "EP_MB_GPU4_PWCS",
+    "EP_MB_GPU5_PWCS",
+    "EP_MB_GPU6_PWCS",
+    "EP_MB_GPU7_PWCS"
   }
 };
 
 size_t mb_sensor_cnt = sizeof(mb_sensor_list)/sizeof(uint8_t);
 size_t pdb_sensor_cnt = sizeof(pdb_sensor_list)/sizeof(uint8_t);
+size_t asic0_sensor_cnt = sizeof(asic0_sensor_list)/sizeof(uint8_t);
+size_t asic1_sensor_cnt = sizeof(asic1_sensor_list)/sizeof(uint8_t);
+size_t asic2_sensor_cnt = sizeof(asic2_sensor_list)/sizeof(uint8_t);
+size_t asic3_sensor_cnt = sizeof(asic3_sensor_list)/sizeof(uint8_t);
+size_t asic4_sensor_cnt = sizeof(asic4_sensor_list)/sizeof(uint8_t);
+size_t asic5_sensor_cnt = sizeof(asic5_sensor_list)/sizeof(uint8_t);
+size_t asic6_sensor_cnt = sizeof(asic6_sensor_list)/sizeof(uint8_t);
+size_t asic7_sensor_cnt = sizeof(asic7_sensor_list)/sizeof(uint8_t);
 
 static void hsc_value_adjust(struct calibration_table *table, float *value)
 {
@@ -1006,7 +1055,8 @@ bool pal_is_fan_prsnt(uint8_t fan)
 
 static int sensors_read_fan_speed(uint8_t sensor_num, float *value)
 {
-  int ret, i, retries = 5;
+  int ret, index;
+  static bool checked[8] = {false, false, false, false, false, false, false, false};
   *value = 0.0;
 
   // Although PWM controller driver had been loaded when BMC booted
@@ -1014,40 +1064,47 @@ static int sensors_read_fan_speed(uint8_t sensor_num, float *value)
   if (!is_device_ready() || !is_fan_prsnt(sensor_num))
     return ERR_SENSOR_NA;
 
-  for (i = 0; i < retries; i++) {
-    switch (sensor_num) {
-      case MB_FAN0_TACH_I:
-        ret = sensors_read_fan("fan1", (float *)value);
-        break;
-      case MB_FAN0_TACH_O:
-        ret = sensors_read_fan("fan2", (float *)value);
-        break;
-      case MB_FAN1_TACH_I:
-        ret = sensors_read_fan("fan3", (float *)value);
-        break;
-      case MB_FAN1_TACH_O:
-        ret = sensors_read_fan("fan4", (float *)value);
-        break;
-      case MB_FAN2_TACH_I:
-        ret = sensors_read_fan("fan5", (float *)value);
-        break;
-      case MB_FAN2_TACH_O:
-        ret = sensors_read_fan("fan6", (float *)value);
-        break;
-      case MB_FAN3_TACH_I:
-        ret = sensors_read_fan("fan7", (float *)value);
-        break;
-      case MB_FAN3_TACH_O:
-        ret = sensors_read_fan("fan8", (float *)value);
-        break;
-      default:
-        return ERR_SENSOR_NA;
-    }
-    if (*value <= sensors_threshold[sensor_num][LCR_THRESH]) {
-      // In case the fans just got installed, fans are still accelerating.
-      msleep(200);
-    } else {
+  switch (sensor_num) {
+    case MB_FAN0_TACH_I:
+      ret = sensors_read_fan("fan1", (float *)value);
       break;
+    case MB_FAN0_TACH_O:
+      ret = sensors_read_fan("fan2", (float *)value);
+      break;
+    case MB_FAN1_TACH_I:
+      ret = sensors_read_fan("fan3", (float *)value);
+      break;
+    case MB_FAN1_TACH_O:
+      ret = sensors_read_fan("fan4", (float *)value);
+      break;
+    case MB_FAN2_TACH_I:
+      ret = sensors_read_fan("fan5", (float *)value);
+      break;
+    case MB_FAN2_TACH_O:
+      ret = sensors_read_fan("fan6", (float *)value);
+      break;
+    case MB_FAN3_TACH_I:
+      ret = sensors_read_fan("fan7", (float *)value);
+      break;
+    case MB_FAN3_TACH_O:
+      ret = sensors_read_fan("fan8", (float *)value);
+      break;
+    default:
+      return ERR_SENSOR_NA;
+  }
+
+  if (ret == 0) {
+    index = sensor_num - MB_FAN0_TACH_I;
+    index = index/2 + index%2;
+    if (*value <= sensors_threshold[sensor_num][LCR_THRESH]) {
+      if (!checked[index]) {
+        // In case the fans just got installed, fans are still accelerating.
+        // Ignore this reading
+        checked[index] = true;
+        return ERR_SENSOR_NA;
+      }
+    } else {
+      checked[index] = false;
     }
   }
 
@@ -1056,48 +1113,57 @@ static int sensors_read_fan_speed(uint8_t sensor_num, float *value)
 
 static int sensors_read_fan_health(uint8_t sensor_num, float *value)
 {
-  int ret, i, retries = 3;
+  int ret, index;
+  static bool checked[8] = {false, false, false, false, false, false, false, false};
   *value = 0.0;
 
   if (pal_is_server_off() || !is_fan_prsnt(sensor_num))
     return ERR_SENSOR_NA;
 
-  for (i = 0; i < retries; i++) {
-    switch (sensor_num) {
-      case MB_FAN0_VOLT:
-        ret = sensors_read("adc128d818-i2c-18-1d", "FAN0_VOLT", (float *)value);
-        break;
-      case MB_FAN0_CURR:
-        ret = sensors_read("adc128d818-i2c-18-1d", "FAN0_CURR", (float *)value);
-        break;
-      case MB_FAN1_VOLT:
-        ret = sensors_read("adc128d818-i2c-18-1d", "FAN1_VOLT", (float *)value);
-        break;
-      case MB_FAN1_CURR:
-        ret = sensors_read("adc128d818-i2c-18-1d", "FAN1_CURR", (float *)value);
-        break;
-      case MB_FAN2_VOLT:
-        ret = sensors_read("adc128d818-i2c-18-1d", "FAN2_VOLT", (float *)value);
-        break;
-      case MB_FAN2_CURR:
-        ret = sensors_read("adc128d818-i2c-18-1d", "FAN2_CURR", (float *)value);
-        break;
-      case MB_FAN3_VOLT:
-        ret = sensors_read("adc128d818-i2c-18-1d", "FAN3_VOLT", (float *)value);
-        break;
-      case MB_FAN3_CURR:
-        ret = sensors_read("adc128d818-i2c-18-1d", "FAN3_CURR", (float *)value);
-        break;
-      default:
-        return ERR_SENSOR_NA;
-    }
-    if (ret == 0 && *value <= sensors_threshold[sensor_num][LCR_THRESH]) {
-      // In case the fans just got installed, ADC might not finish sampling
-      msleep(100);
-    } else {
+  switch (sensor_num) {
+    case MB_FAN0_VOLT:
+      ret = sensors_read("adc128d818-i2c-18-1d", "FAN0_VOLT", (float *)value);
       break;
+    case MB_FAN0_CURR:
+      ret = sensors_read("adc128d818-i2c-18-1d", "FAN0_CURR", (float *)value);
+      break;
+    case MB_FAN1_VOLT:
+      ret = sensors_read("adc128d818-i2c-18-1d", "FAN1_VOLT", (float *)value);
+      break;
+    case MB_FAN1_CURR:
+      ret = sensors_read("adc128d818-i2c-18-1d", "FAN1_CURR", (float *)value);
+      break;
+    case MB_FAN2_VOLT:
+      ret = sensors_read("adc128d818-i2c-18-1d", "FAN2_VOLT", (float *)value);
+      break;
+    case MB_FAN2_CURR:
+      ret = sensors_read("adc128d818-i2c-18-1d", "FAN2_CURR", (float *)value);
+      break;
+    case MB_FAN3_VOLT:
+      ret = sensors_read("adc128d818-i2c-18-1d", "FAN3_VOLT", (float *)value);
+      break;
+    case MB_FAN3_CURR:
+      ret = sensors_read("adc128d818-i2c-18-1d", "FAN3_CURR", (float *)value);
+      break;
+    default:
+      return ERR_SENSOR_NA;
+  }
+
+  if (ret == 0) {
+    index = sensor_num - MB_FAN0_VOLT;
+    index = index/2 + index%2;
+    if (*value <= sensors_threshold[sensor_num][LCR_THRESH]) {
+      if (!checked[index]) {
+        // In case the fans just got installed, ADC might not finish sampling
+        // Ignore this reading
+        checked[index] = true;
+        return ERR_SENSOR_NA;
+      }
+    } else {
+      checked[index] = false;
     }
   }
+
   return ret < 0? ERR_SENSOR_NA: 0;
 }
 
@@ -1348,8 +1414,18 @@ static int sensors_read_12v_hsc(uint8_t sensor_num, float *value)
       if (ret == 0)
         hsc_value_adjust(power_table, value);
       break;
+    case PDB_HSC_P12V_1_PWR_PEAK:
+      ret = sensors_read("ltc4282-i2c-16-53", "power1_input_highest", value);
+      if (ret == 0)
+        hsc_value_adjust(power_table, value);
+      break;
     case PDB_HSC_P12V_2_PWR:
       ret = sensors_read("ltc4282-i2c-17-40", "P12V_2_PWR", value);
+      if (ret == 0)
+        hsc_value_adjust(power_table, value);
+      break;
+    case PDB_HSC_P12V_2_PWR_PEAK:
+      ret = sensors_read("ltc4282-i2c-17-40", "power1_input_highest", value);
       if (ret == 0)
         hsc_value_adjust(power_table, value);
       break;
@@ -1357,6 +1433,13 @@ static int sensors_read_12v_hsc(uint8_t sensor_num, float *value)
       ret = sensors_read("adm1278-i2c-18-42", "P12V_AUX_PWR", value);
       if (ret < 0)
         ret = sensors_read("ltc4282-i2c-18-43", "P12V_AUX_PWR", value);
+      if (ret == 0)
+        hsc_value_adjust(aux_power_table, value);
+      break;
+    case PDB_HSC_P12V_AUX_PWR_PEAK:
+      ret = sensors_read("adm1278-i2c-18-42", "power1_input_highest", value);
+      if (ret < 0)
+        ret = sensors_read("ltc4282-i2c-18-43", "power1_input_highest", value);
       if (ret == 0)
         hsc_value_adjust(aux_power_table, value);
       break;
@@ -1417,12 +1500,6 @@ static int sensors_read_48v_hsc(uint8_t sensor_num, float *value)
     case PDB_HSC_P48V_2_VIN:
       ret = sensors_read("adm1272-i2c-17-10", "P48V_2_VIN", value);
       break;
-    case PDB_HSC_P48V_1_VOUT:
-      ret = sensors_read("adm1272-i2c-16-13", "P48V_1_VOUT", value);
-      break;
-    case PDB_HSC_P48V_2_VOUT:
-      ret = sensors_read("adm1272-i2c-17-10", "P48V_2_VOUT", value);
-      break;
     case PDB_HSC_P48V_1_CURR:
       ret = sensors_read("adm1272-i2c-16-13", "P48V_1_CURR", value);
       if (ret == 0)
@@ -1438,10 +1515,84 @@ static int sensors_read_48v_hsc(uint8_t sensor_num, float *value)
       if (ret == 0)
         hsc_value_adjust(p48v_power_table, value);
       break;
+    case PDB_HSC_P48V_1_PWR_PEAK:
+      ret = sensors_read("adm1272-i2c-16-13", "power1_input_highest", value);
+      if (ret == 0)
+        hsc_value_adjust(p48v_power_table, value);
+      break;
     case PDB_HSC_P48V_2_PWR:
       ret = sensors_read("adm1272-i2c-17-10", "P48V_2_PWR", value);
       if (ret == 0)
         hsc_value_adjust(p48v_power_table, value);
+      break;
+    case PDB_HSC_P48V_2_PWR_PEAK:
+      ret = sensors_read("adm1272-i2c-17-10", "power1_input_highest", value);
+      if (ret == 0)
+        hsc_value_adjust(p48v_power_table, value);
+      break;
+    default:
+      ret = ERR_SENSOR_NA;
+  }
+
+  if (*value < 0)
+    *value = 0.0;
+
+  return ret < 0? ERR_SENSOR_NA: 0;
+}
+
+static void enable_adm1272_vout(int bus, int addr)
+{
+  int fd;
+  char dev[64] = {0};
+  uint8_t tbuf[8] = {0};
+  uint8_t rbuf[8] = {0};
+
+  snprintf(dev, sizeof(dev), "/dev/i2c-%d", bus);
+  fd = open(dev, O_RDWR);
+  if (fd < 0)
+    goto exit;
+
+  // Enable Vout
+  tbuf[0] = 0xd4; // PMON_CONFIG
+  tbuf[1] = 0x37;
+  tbuf[2] = 0x3f;
+  i2c_rdwr_msg_transfer(fd, addr << 1, tbuf, 3, rbuf, 0);
+  // ADM127x don't recommend to read data just after modifying power monitor register
+  // The sampling probably was interrupted then reported wrong data.
+  close(fd);
+  return;
+exit:
+  syslog(LOG_CRIT, "Failed to enable P48V VOUT monitoring");
+}
+
+static int sensors_read_48v_hsc_vout(uint8_t sensor_num, float *value)
+{
+  int ret;
+  static int pwr_flag[2] = {0, 0};
+
+  if (!is_device_ready()) {
+    pwr_flag[0] = pwr_flag[1] = 0;
+    return ERR_SENSOR_NA;
+  }
+
+  switch (sensor_num) {
+    case PDB_HSC_P48V_1_VOUT:
+      if (pwr_flag[0] == 0) {
+        enable_adm1272_vout(16, 0x13);
+        pwr_flag[0] = 1;
+        return ERR_SENSOR_NA;
+      }
+
+      ret = sensors_read("adm1272-i2c-16-13", "P48V_1_VOUT", value);
+      break;
+    case PDB_HSC_P48V_2_VOUT:
+      if (pwr_flag[1] == 0) {
+        enable_adm1272_vout(17, 0x10);
+        pwr_flag[1] = 1;
+        return ERR_SENSOR_NA;
+      }
+
+      ret = sensors_read("adm1272-i2c-17-10", "P48V_2_VOUT", value);
       break;
     default:
       ret = ERR_SENSOR_NA;
@@ -1503,21 +1654,56 @@ static int read_gpu_pwcs(uint8_t sensor_num, float *value)
 
 int pal_get_fru_sensor_list(uint8_t fru, uint8_t **sensor_list, int *cnt)
 {
-  if (fru == FRU_MB) {
-    *sensor_list = (uint8_t *) mb_sensor_list;
-    *cnt = mb_sensor_cnt;
-  } else if (fru == FRU_PDB) {
-    *sensor_list = (uint8_t *) pdb_sensor_list;
-    *cnt = pdb_sensor_cnt;
-  } else if (fru == FRU_BSM) {
-    *sensor_list = NULL;
-    *cnt = 0;
-  } else {
-    *sensor_list = NULL;
-    *cnt = 0;
-    return -1;
-  }
-
+  switch (fru) {
+    case FRU_MB:
+      *sensor_list = (uint8_t *) mb_sensor_list;
+      *cnt = mb_sensor_cnt;
+      break;
+    case FRU_PDB:
+      *sensor_list = (uint8_t *) pdb_sensor_list;
+      *cnt = pdb_sensor_cnt;
+      break;
+    case FRU_BSM:
+      *sensor_list = NULL;
+      *cnt = 0;
+      break;
+    case FRU_ASIC0:
+      *sensor_list = (uint8_t *) asic0_sensor_list;
+      *cnt = asic0_sensor_cnt;
+      break;
+    case FRU_ASIC1:
+      *sensor_list = (uint8_t *) asic1_sensor_list;
+      *cnt = asic1_sensor_cnt;
+      break;
+    case FRU_ASIC2:
+      *sensor_list = (uint8_t *) asic2_sensor_list;
+      *cnt = asic2_sensor_cnt;
+      break;
+    case FRU_ASIC3:
+      *sensor_list = (uint8_t *) asic3_sensor_list;
+      *cnt = asic3_sensor_cnt;
+      break;
+    case FRU_ASIC4:
+      *sensor_list = (uint8_t *) asic4_sensor_list;
+      *cnt = asic4_sensor_cnt;
+      break;
+    case FRU_ASIC5:
+      *sensor_list = (uint8_t *) asic5_sensor_list;
+      *cnt = asic5_sensor_cnt;
+      break;
+    case FRU_ASIC6:
+      *sensor_list = (uint8_t *) asic6_sensor_list;
+      *cnt = asic6_sensor_cnt;
+      break;
+    case FRU_ASIC7:
+      *sensor_list = (uint8_t *) asic7_sensor_list;
+      *cnt = asic7_sensor_cnt;
+      break;
+    default:
+      *sensor_list = NULL;
+      *cnt = 0;
+      return -1;
+  };
   return 0;
 }
 
@@ -1526,20 +1712,20 @@ static void init_sensor_threshold_by_mfr(uint8_t vendor)
   int sensor;
 
   if (vendor == GPU_AMD) {
-    for (sensor = MB_GPU0_TEMP; sensor < MB_GPU7_TEMP; sensor++) {
+    for (sensor = MB_GPU0_TEMP; sensor <= MB_GPU7_TEMP; sensor++) {
       sensors_threshold[sensor][LCR_THRESH] = 10.0;
       sensors_threshold[sensor][UCR_THRESH] = 100.0;
     }
-    for (sensor = MB_GPU0_HBM_TEMP; sensor < MB_GPU7_HBM_TEMP; sensor++) {
+    for (sensor = MB_GPU0_HBM_TEMP; sensor <= MB_GPU7_HBM_TEMP; sensor++) {
       sensors_threshold[sensor][LCR_THRESH] = 10.0;
       sensors_threshold[sensor][UCR_THRESH] = 94.0;
     }
-  } else if (vendor == GPU_NV) {
-    for (sensor = MB_GPU0_TEMP; sensor < MB_GPU7_TEMP; sensor++) {
+  } else if (vendor == GPU_NVIDIA) {
+    for (sensor = MB_GPU0_TEMP; sensor <= MB_GPU7_TEMP; sensor++) {
       sensors_threshold[sensor][LCR_THRESH] = 10.0;
       sensors_threshold[sensor][UCR_THRESH] = 85.0;
     }
-    for (sensor = MB_GPU0_HBM_TEMP; sensor < MB_GPU7_HBM_TEMP; sensor++) {
+    for (sensor = MB_GPU0_HBM_TEMP; sensor <= MB_GPU7_HBM_TEMP; sensor++) {
       sensors_threshold[sensor][LCR_THRESH] = 10.0;
       sensors_threshold[sensor][UCR_THRESH] = 95.0;
     }
@@ -1553,15 +1739,15 @@ int pal_get_sensor_threshold(uint8_t fru, uint8_t sensor_num, uint8_t thresh, vo
   char vendor[16] = {0};
   static uint8_t vendor_id = GPU_UNKNOWN;
 
-  if (fru > FRU_PDB || sensor_num >= FBEP_SENSOR_MAX)
+  if (fru == FRU_BSM || fru > FRU_ASIC7 || sensor_num >= FBEP_SENSOR_MAX)
     return -1;
 
   if (vendor_id == GPU_UNKNOWN) {
       pal_get_key_value("asic_mfr", vendor);
       if (!strcmp(vendor, MFR_AMD)) {
 	vendor_id = GPU_AMD;
-      } else if (!strcmp(vendor, MFR_NV)) {
-	vendor_id = GPU_NV;
+      } else if (!strcmp(vendor, MFR_NVIDIA)) {
+	vendor_id = GPU_NVIDIA;
       }
       init_sensor_threshold_by_mfr(vendor_id);
   }
@@ -1576,15 +1762,15 @@ int pal_get_sensor_name(uint8_t fru, uint8_t sensor_num, char *name)
   char vendor[16] = {0};
   static uint8_t vendor_id = GPU_UNKNOWN;
 
-  if (fru > FRU_PDB)
+  if (fru == FRU_BSM || fru > FRU_ASIC7 || sensor_num >= FBEP_SENSOR_MAX)
     return -1;
 
   if (vendor_id == GPU_UNKNOWN) {
       pal_get_key_value("asic_mfr", vendor);
       if (!strcmp(vendor, MFR_AMD))
 	vendor_id = GPU_AMD;
-      else if (!strcmp(vendor, MFR_NV))
-	vendor_id = GPU_NV;
+      else if (!strcmp(vendor, MFR_NVIDIA))
+	vendor_id = GPU_NVIDIA;
   }
 
   if (sensor_num >= FBEP_SENSOR_MAX) {
@@ -1601,7 +1787,7 @@ int pal_get_sensor_name(uint8_t fru, uint8_t sensor_num, char *name)
 
 int pal_get_sensor_units(uint8_t fru, uint8_t sensor_num, char *units)
 {
-  if (fru > FRU_PDB || sensor_num >= FBEP_SENSOR_MAX)
+  if (fru == FRU_BSM || fru > FRU_ASIC7 || sensor_num >= FBEP_SENSOR_MAX)
     return -1;
 
   switch(fbep_sensors_map[sensor_num].unit) {
@@ -1628,7 +1814,7 @@ int pal_get_sensor_units(uint8_t fru, uint8_t sensor_num, char *units)
 
 int pal_get_sensor_poll_interval(uint8_t fru, uint8_t sensor_num, uint32_t *value)
 {
-  if (fru > FRU_PDB)
+  if (fru == FRU_BSM || fru > FRU_ASIC7 || sensor_num >= FBEP_SENSOR_MAX)
     return -1;
 
   // default poll interval
@@ -1642,9 +1828,31 @@ int pal_get_sensor_poll_interval(uint8_t fru, uint8_t sensor_num, uint32_t *valu
 
 int pal_sensor_read_raw(uint8_t fru, uint8_t sensor_num, void *value)
 {
-  if (fru > FRU_PDB || sensor_num >= FBEP_SENSOR_MAX)
+  int ret, lock;
+  char asic_lock[32] = {0};
+
+  if (fru == FRU_BSM || fru > FRU_ASIC7 || sensor_num >= FBEP_SENSOR_MAX)
     return ERR_SENSOR_NA;
 
-  return fbep_sensors_map[sensor_num].sensor_read(sensor_num, (float *)value);
+  if (fru >= FRU_ASIC0 && fru <= FRU_ASIC7) {
+    snprintf(asic_lock, sizeof(asic_lock), "/tmp/asic_lock%d", (int)fru-FRU_ASIC0);
+    lock = open(asic_lock, O_CREAT | O_RDWR, 0666);
+    if (lock < 0) {
+      return ERR_FAILURE; // Skip
+    }
+    if (flock(lock, LOCK_EX | LOCK_NB) && errno == EWOULDBLOCK) {
+      close(lock);
+      return ERR_FAILURE; // Skip
+    }
+  }
+
+  ret = fbep_sensors_map[sensor_num].sensor_read(sensor_num, (float *)value);
+
+  if (fru >= FRU_ASIC0 && fru <= FRU_ASIC7) {
+    flock(lock, LOCK_UN);
+    close(lock);
+  }
+
+  return ret;
 }
 

@@ -17,11 +17,15 @@
 
 FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 
+PACKAGECONFIG += "disable-watchdog"
+
 SRC_URI += "file://board-utils.sh \
+            file://boot_info.sh \
             file://bios_util.sh \
             file://fpga_util.sh \
             file://fpga_ver.sh \
             file://dump_pim_serials.sh \
+            file://dump_gpios.sh \
             file://eth0_mac_fixup.sh \
             file://hclk_fixup.sh \
             file://oob-eeprom-util.sh \
@@ -37,14 +41,21 @@ SRC_URI += "file://board-utils.sh \
             file://show_tech.py \
             file://psu_show_tech.py \
             file://pim_enable.sh \
+            file://pim_types.sh \
+            file://elbert_pim.layout \
+            file://peutil \
+            file://spi_pim_ver.sh \
+            file://meta_info.sh \
            "
 
 OPENBMC_UTILS_FILES += " \
     board-utils.sh \
     bios_util.sh \
+    boot_info.sh \
     fpga_util.sh \
     fpga_ver.sh \
     dump_pim_serials.sh \
+    dump_gpios.sh \
     oob-eeprom-util.sh \
     oob-mdio-util.sh \
     wedge_power.sh \
@@ -55,6 +66,10 @@ OPENBMC_UTILS_FILES += " \
     show_tech.py \
     psu_show_tech.py \
     pim_enable.sh \
+    pim_types.sh \
+    peutil \
+    spi_pim_ver.sh \
+    meta_info.sh \
     "
 
 DEPENDS_append = " update-rc.d-native"
@@ -93,13 +108,17 @@ do_install_board() {
     install -m 755 setup_board.sh ${D}${sysconfdir}/init.d/setup_board.sh
     update-rc.d -r ${D} setup_board.sh start 80 S .
 
+    # create VLAN intf automatically
+    install -d ${D}/${sysconfdir}/network/if-up.d
+    install -m 755 create_vlan_intf ${D}${sysconfdir}/network/if-up.d/create_vlan_intf
+
     install -m 755 power-on.sh ${D}${sysconfdir}/init.d/power-on.sh
     update-rc.d -r ${D} power-on.sh start 85 S .
 
     install -m 0755 ${WORKDIR}/rc.local ${D}${sysconfdir}/init.d/rc.local
     update-rc.d -r ${D} rc.local start 99 2 3 4 5 .
 
-    # install -m 0755 ${WORKDIR}/elbert_bios.layout ${D}${sysconfdir}/elbert_bios.layout
+    install -m 0755 ${WORKDIR}/elbert_pim.layout ${D}${sysconfdir}/elbert_pim.layout
 }
 
 do_install_append() {

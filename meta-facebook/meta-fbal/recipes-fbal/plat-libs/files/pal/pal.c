@@ -60,11 +60,28 @@
 
 #define ETHERNET_BR0_INTERFACE_PATH "/sys/class/net/br0"
 
-const char pal_fru_list[] = "all, mb, nic0, nic1, pdb, bmc";
+#define NUM_SERVER_FRU  1
+#define NUM_NIC_FRU     2
+#define NUM_BMC_FRU     1
+
+const char pal_fru_list[] = "all, mb, nic0, nic1, pdb, bmc, tray0_mb, tray1_mb, tray0_nic0, tray0_nic1, tray1_nic0, tray1_nic1, tray0_bmc, tray1_bmc";
 const char pal_server_list[] = "mb";
+const char *pal_server_fru_list[NUM_SERVER_FRU] = {"mb"};
+const char *pal_nic_fru_list[NUM_NIC_FRU] = {"nic0", "nic1"};
+const char *pal_bmc_fru_list[NUM_BMC_FRU] = {"bmc"};
+
+size_t server_fru_cnt = NUM_SERVER_FRU;
+size_t nic_fru_cnt  = NUM_NIC_FRU;
+size_t bmc_fru_cnt  = NUM_BMC_FRU;
+
 
 static int key_func_por_policy (int event, void *arg);
 static int key_func_lps (int event, void *arg);
+
+uint8_t FRU_MB = FRU_TRAY0_MB;
+uint8_t FRU_NIC0 = FRU_TRAY0_NIC0;
+uint8_t FRU_NIC1 = FRU_TRAY0_NIC1;
+uint8_t FRU_BMC = FRU_TRAY0_BMC;
 
 enum key_event {
   KEY_BEFORE_SET,
@@ -288,42 +305,38 @@ int
 pal_is_fru_prsnt(uint8_t fru, uint8_t *status) {
   gpio_desc_t *gdesc = NULL;
   gpio_value_t val;
-
+  uint8_t mode;
+  bool master;
+  if (pal_get_host_system_mode(&mode)) {
+    return -1;
+  }
+  master = pal_get_config_is_master();
   *status = 0;
-
-  switch (fru) {
-  case FRU_MB:
+  // This MB, PDB, BMC && DBG
+  if (fru == FRU_MB || fru == FRU_PDB || fru == FRU_BMC || fru == FRU_DBG) {
     *status = 1;
-    break;
-  case FRU_NIC0:
+  } else if ( master && (mode == MB_4S_MODE) && (fru == FRU_TRAY1_MB) ) {
+    // Support tray1 MB in master BMC.
+    *status = 1;
+  } else if (fru == FRU_NIC0) {
     if ((gdesc = gpio_open_by_shadow(GPIO_NIC0_PRSNT))) {
       if (!gpio_get_value(gdesc, &val)) {
         *status = !val;
       }
       gpio_close(gdesc);
     }
-    break;
-  case FRU_NIC1:
+  } else if (fru == FRU_NIC1) {
     if ((gdesc = gpio_open_by_shadow(GPIO_NIC1_PRSNT))) {
       if (!gpio_get_value(gdesc, &val)) {
         *status = !val;
       }
       gpio_close(gdesc);
     }
-    break;
-  case FRU_PDB:
-    *status = 1;
-    break;
-  case FRU_BMC:
-    *status = 1;
-    break;
-  case FRU_DBG:
-    *status = 1;
-    break;
-  default:
+  } else if (fru > FRU_ALL && fru < FRU_CNT) {
+    *status = 0;
+  } else {
     return -1;
   }
-
   return 0;
 }
 
@@ -388,44 +401,71 @@ pal_get_fru_id(char *str, uint8_t *fru) {
     *fru = FRU_ALL;
   } else if (!strcmp(str, "mb") || !strcmp(str, "cpld") || !strcmp(str, "vr")) {
     *fru = FRU_MB;
+  } else if (!strcmp(str, "tray0_mb")) {
+    *fru = FRU_TRAY0_MB;
+  } else if (!strcmp(str, "tray1_mb")) {
+    *fru = FRU_TRAY1_MB;
   } else if (!strcmp(str, "pdb")) {
     *fru = FRU_PDB;
   } else if (!strcmp(str, "nic0") || !strcmp(str, "nic")) {
     *fru = FRU_NIC0;
   } else if (!strcmp(str, "nic1")) {
     *fru = FRU_NIC1;
+  } else if (!strcmp(str, "tray0_nic0")) {
+    *fru = FRU_TRAY0_NIC0;
+  } else if (!strcmp(str, "tray0_nic1")) {
+    *fru = FRU_TRAY0_NIC1;
+  } else if (!strcmp(str, "tray1_nic0")) {
+    *fru = FRU_TRAY1_NIC0;
+  } else if (!strcmp(str, "tray1_nic1")) {
+    *fru = FRU_TRAY1_NIC1;
   } else if (!strcmp(str, "ocpdbg")) {
     *fru = FRU_DBG;
   } else if (!strcmp(str, "bmc")) {
     *fru = FRU_BMC;
+  } else if (!strcmp(str, "tray0_bmc")) {
+    *fru = FRU_TRAY0_BMC;
+  } else if (!strcmp(str, "tray1_bmc")) {
+    *fru = FRU_TRAY1_BMC;
   } else {
     syslog(LOG_WARNING, "pal_get_fru_id: Wrong fru#%s", str);
     return -1;
   }
-
   return 0;
 }
 
 int
 pal_get_fru_name(uint8_t fru, char *name) {
   switch (fru) {
-    case FRU_MB:
-      strcpy(name, "mb");
+    case FRU_TRAY0_MB:
+      strcpy(name, "tray0_mb");
+      break;
+    case FRU_TRAY1_MB:
+      strcpy(name, "tray1_mb");
       break;
     case FRU_PDB:
       strcpy(name, "pdb");
       break;
-    case FRU_NIC0:
-      strcpy(name, "nic0");
+    case FRU_TRAY0_NIC0:
+      strcpy(name, "tray0_nic0");
       break;
-    case FRU_NIC1:
-      strcpy(name, "nic1");
+    case FRU_TRAY0_NIC1:
+      strcpy(name, "tray0_nic1");
+      break;
+    case FRU_TRAY1_NIC0:
+      strcpy(name, "tray1_nic0");
+      break;
+    case FRU_TRAY1_NIC1:
+      strcpy(name, "tray1_nic1");
       break;
     case FRU_DBG:
       strcpy(name, "ocpdbg");
       break;
-    case FRU_BMC:
-      strcpy(name, "bmc");
+    case FRU_TRAY0_BMC:
+      strcpy(name, "tray0_bmc");
+      break;
+    case FRU_TRAY1_BMC:
+      strcpy(name, "tray1_bmc");
       break;
     default:
       if (fru > MAX_NUM_FRUS)
@@ -508,26 +548,19 @@ int
 pal_get_fruid_path(uint8_t fru, char *path) {
   char fname[16] = {0};
 
-  switch(fru) {
-  case FRU_MB:
+  if (fru == FRU_MB) {
     sprintf(fname, "mb");
-    break;
-  case FRU_NIC0:
+  } else if (fru == FRU_NIC0) {
     sprintf(fname, "nic0");
-    break;
-  case FRU_NIC1:
+  } else if (fru == FRU_NIC1) {
     sprintf(fname, "nic1");
-    break;
-  case FRU_PDB:
+  } else if (fru == FRU_PDB) {
     sprintf(fname, "pdb");
-    break;
-  case FRU_BMC:
+  } else if (fru == FRU_BMC) {
     sprintf(fname, "bmc");
-    break;
-  default:
+  } else {
     return -1;
   }
-
   sprintf(path, "/tmp/fruid_%s.bin", fname);
   return 0;
 }
@@ -549,48 +582,58 @@ int
 pal_get_fruid_eeprom_path(uint8_t fru, char *path) {
   char FRU_EEPROM_MB[64];
 
-  switch(fru) {
-  case FRU_MB:
+  if (fru == FRU_MB) {
     fru_eeprom_mb_check(FRU_EEPROM_MB);
     sprintf(path, "%s", FRU_EEPROM_MB);
-    break;
-  case FRU_NIC0:
+  } else if (fru == FRU_NIC0) {
     sprintf(path, FRU_EEPROM_NIC0);
-    break;
-  case FRU_NIC1:
+  } else if (fru == FRU_NIC1) {
     sprintf(path, FRU_EEPROM_NIC1);
-    break;
-  case FRU_BMC:
+  } else if (fru == FRU_BMC) {
     sprintf(path, FRU_EEPROM_BMC);
-    break;
-  default:
+  } else {
     return -1;
   }
-
   return 0;
 }
 
 int
 pal_get_fruid_name(uint8_t fru, char *name) {
   switch(fru) {
-  case FRU_MB:
-    sprintf(name, "Mother Board");
+  case FRU_TRAY0_MB:
+    sprintf(name, "Tray0 Mother Board");
     break;
 
-  case FRU_NIC0:
-    sprintf(name, "Mezz Card 0");
+  case FRU_TRAY0_NIC0:
+    sprintf(name, "Tray0 Mezz Card 0");
     break;
 
-  case FRU_NIC1:
-    sprintf(name, "Mezz Card 1");
+  case FRU_TRAY0_NIC1:
+    sprintf(name, "Tray0 Mezz Card 1");
+    break;
+
+  case FRU_TRAY1_MB:
+    sprintf(name, "Tray1 Mother Board");
+    break;
+
+  case FRU_TRAY1_NIC0:
+    sprintf(name, "Tray1 Mezz Card 0");
+    break;
+
+  case FRU_TRAY1_NIC1:
+    sprintf(name, "Tray1 Mezz Card 1");
     break;
 
   case FRU_PDB:
     sprintf(name, "PDB");
     break;
 
-  case FRU_BMC:
-    sprintf(name, "BMC");
+  case FRU_TRAY0_BMC:
+    sprintf(name, "Tray0 BMC");
+    break;
+
+  case FRU_TRAY1_BMC:
+    sprintf(name, "Tray1 BMC");
     break;
 
   default:
@@ -754,10 +797,11 @@ int
 pal_get_blade_id(uint8_t *id) {
   static bool cached = false;
   static unsigned int cached_id = 0;
+  uint8_t mode;
 
   if (!cached) {
-    const char *shadows[] = {
-      "FM_BLADE_ID_0",
+    const char *shadows[] = {    //BLADE_ID[1:0] 00 MB0 Lowest
+      "FM_BLADE_ID_0",           //BLADE_ID[1:0] 10 MB1
       "FM_BLADE_ID_1"
     };
     if (gpio_get_value_by_shadow_list(shadows, ARRAY_SIZE(shadows), &cached_id)) {
@@ -765,6 +809,16 @@ pal_get_blade_id(uint8_t *id) {
     }
     cached = true;
   }
+
+  /*Workaround: 
+    The blade0 goto high when non plug upi board in standby mode.
+    After power on blade0 change to 0 in 2S Mode MB3.
+  */
+  if( !pal_get_host_system_mode(&mode) && mode == MB_2S_MODE ) {
+    cached_id = 0;
+    cached = true;
+  }
+
   *id = (uint8_t)cached_id;
   return 0;
 }
@@ -793,6 +847,43 @@ pal_get_bmc_ipmb_slave_addr(uint16_t* slave_addr, uint8_t bus_id) {
 #ifdef DEBUG
   syslog(LOG_DEBUG,"%s BMC Slave Addr=%d bus=%d", __func__, *slave_addr, bus_id);
 #endif
+  return 0;
+}
+
+int
+pal_peer_tray_get_lan_config(uint8_t sel, uint8_t *buf, uint8_t *rlen)
+{
+  uint8_t netfn = NETFN_TRANSPORT_REQ;
+  uint8_t ipmi_cmd = CMD_TRANSPORT_GET_LAN_CONFIG;
+  uint8_t req[2] = {0x0, sel};
+  uint8_t resp[MAX_IPMI_MSG_SIZE];
+  uint16_t bmc_addr;
+  uint16_t dest_bmc_addr;
+  uint8_t val;
+  int ret;
+
+  ret = pal_get_blade_id(&val);
+  if (ret) {
+    return ret;
+  }
+  dest_bmc_addr = val ? 0x20 : 0x22;
+
+  ret = pal_get_bmc_ipmb_slave_addr(&bmc_addr, I2C_BUS_2);
+  if (ret) {
+    return ret;
+  }
+  ret = lib_ipmb_send_request(ipmi_cmd, netfn,
+                        req, 2, resp, rlen,
+                        I2C_BUS_2, dest_bmc_addr, bmc_addr);
+
+  if (ret) {
+    return ret;
+  }
+  if (*rlen <= 1) {
+    return -1;
+  }
+  *rlen = *rlen - 1;
+  memcpy(buf, resp + 1, *rlen);
   return 0;
 }
 
@@ -861,15 +952,9 @@ pal_get_mb_position(uint8_t* pos) {
 
     switch (cached_pos) {
       case 0:
-        cached_pos = MB_ID4;
+        cached_pos = MB_ID0;
         break;
       case 1:
-        cached_pos = MB_ID3;
-        break;
-      case 2:
-        cached_pos = MB_ID2;
-        break;
-      case 3:
         cached_pos = MB_ID1;
         break;
       default:
@@ -882,21 +967,6 @@ pal_get_mb_position(uint8_t* pos) {
 #ifdef DEBUG
   syslog(LOG_DEBUG,"%s BMC Position ID =%d\n", __func__, cached_pos);
 #endif
-  return 0;
-}
-
-int
-pal_get_mb_mode(uint8_t* mode) {
-  int ret=0;
-
-  ret = cmd_cmc_get_config_mode(mode);
-#ifdef DEBUG
-  syslog(LOG_DEBUG, "%s mode=%d\n", __func__, *mode);
-#endif
-  if(ret != 0) {
-    return ret;
-  }
-
   return 0;
 }
 
@@ -943,9 +1013,9 @@ pal_get_host_system_mode(uint8_t* mode) {
   static unsigned int cached_pos = 0;
 
   if (!cached) {
-    const char *shadows[] = {
-      "FM_BMC_SKT_ID_1",
-      "FM_BMC_SKT_ID_2"
+    const char *shadows[] = {     //SKT_ID[2:1] 00
+      "FM_BMC_SKT_ID_1",          //SKT_ID[2:1] 01
+      "FM_BMC_SKT_ID_2"           //SKT_ID[2:1] 10
     };
     if (gpio_get_value_by_shadow_list(shadows, ARRAY_SIZE(shadows), &cached_pos)) {
       return -1;
@@ -1012,37 +1082,33 @@ pal_get_sysfw_ver(uint8_t slot, uint8_t *ver) {
 }
 
 int
-pal_uart_select (uint32_t base, uint8_t offset, int option, uint32_t para) {
-  uint32_t mmap_fd;
+pal_postcode_select(int option) {
+  int mmap_fd;
   uint32_t ctrl;
   void *reg_base;
   void *reg_offset;
 
-  mmap_fd = open("/dev/mem", O_RDWR | O_SYNC );
+  mmap_fd = open("/dev/mem", O_RDWR | O_SYNC);
   if (mmap_fd < 0) {
     return -1;
   }
 
-  reg_base = mmap(NULL, PAGE_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, mmap_fd, base);
-  reg_offset = (char*) reg_base + offset;
-  ctrl = *(volatile uint32_t*) reg_offset;
+  reg_base = mmap(NULL, PAGE_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, mmap_fd, AST_GPIO_BASE);
+  reg_offset = (uint8_t *)reg_base + UARTSW_OFFSET;
+  ctrl = *(volatile uint32_t *)reg_offset;
 
   switch(option) {
-    case UARTSW_BY_BMC:                //UART Switch control by bmc
+    case POSTCODE_BY_BMC:   // POST code LED controlled by BMC
       ctrl &= 0x00ffffff;
       break;
-    case UARTSW_BY_DEBUG:           //UART Switch control by debug card
+    case POSTCODE_BY_HOST:  // POST code LED controlled by LPC
       ctrl |= 0x01000000;
-      break;
-    case SET_SEVEN_SEGMENT:      //set channel on the seven segment display
-      ctrl &= 0x00ffffff;
-      ctrl |= para;
       break;
     default:
       syslog(LOG_WARNING, "pal_mmap: unknown option");
       break;
   }
-  *(volatile uint32_t*) reg_offset = ctrl;
+  *(volatile uint32_t *)reg_offset = ctrl;
 
   munmap(reg_base, PAGE_SIZE);
   close(mmap_fd);
@@ -1052,33 +1118,39 @@ pal_uart_select (uint32_t base, uint8_t offset, int option, uint32_t para) {
 
 int
 pal_uart_select_led_set(void) {
-  static uint32_t pre_channel = 0xffffffff;
-  unsigned int vals;
-  uint32_t channel = 0;
-  const char *shadows[] = {
+  static uint32_t pre_channel = 0xFF;
+  uint32_t channel;
+  uint32_t vals;
+  const char *uartsw_pins[] = {
     "FM_UARTSW_LSB_N",
     "FM_UARTSW_MSB_N"
   };
+  const char *postcode_pins[] = {
+    "LED_POSTCODE_0",
+    "LED_POSTCODE_1",
+    "LED_POSTCODE_2",
+    "LED_POSTCODE_3",
+    "LED_POSTCODE_4",
+    "LED_POSTCODE_5",
+    "LED_POSTCODE_6",
+    "LED_POSTCODE_7"
+  };
 
-  //UART Switch control by bmc
-  pal_uart_select(AST_GPIO_BASE, UARTSW_OFFSET, UARTSW_BY_BMC, 0);
+  pal_postcode_select(POSTCODE_BY_BMC);
 
-  if (gpio_get_value_by_shadow_list(shadows, ARRAY_SIZE(shadows), &vals)) {
+  if (gpio_get_value_by_shadow_list(uartsw_pins, ARRAY_SIZE(uartsw_pins), &vals)) {
     return -1;
   }
-  // The GPIOs are active-low. So, invert it.
-  channel = (uint32_t)(~vals & 0x3);
-  // Shift to get to the bit position of the led.
-  channel = channel << 24;
+  channel = ~vals & 0x3;  // the GPIOs are active-low, so invert it
 
-  // If the requested channel is the same as the previous, do nothing.
-  if (channel == pre_channel) {
-     return -1;
+  if (channel != pre_channel) {
+    // show channel on 7-segment display
+    if (gpio_set_value_by_shadow_list(postcode_pins, ARRAY_SIZE(postcode_pins), channel)) {
+      return -1;
+    }
+    pre_channel = channel;
   }
-  pre_channel = channel;
 
-  //show channel on 7-segment display
-  pal_uart_select(AST_GPIO_BASE, SEVEN_SEGMENT_OFFSET, SET_SEVEN_SEGMENT, channel);
   return 0;
 }
 
@@ -1525,6 +1597,10 @@ static int get_dev_bridge_info(uint8_t slot, uint8_t* dev_addr,
       *bus_num = ASIC_IPMB_BUS_ID;
       break;
 
+    case BRIDGE_2_IOX_BMC:
+      *dev_addr = IOX_BMC_SLAVE_ADDR;
+      *bus_num = IOX_IPMB_BUS_ID;
+      break;
     default:
       return -1;
   }
@@ -1636,7 +1712,9 @@ int pal_bypass_cmd(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *re
   uint8_t status;
 
   *res_len = 0;
-  ret = pal_is_fru_prsnt(slot, &status);
+
+  ret = pal_is_fru_prsnt(FRU_MB, &status);
+
   if (ret < 0) {
     return CC_OEM_DEVICE_NOT_PRESENT;
   }
@@ -1653,6 +1731,7 @@ int pal_bypass_cmd(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *re
     case BRIDGE_2_MB_BMC2:   //MB BMC2
     case BRIDGE_2_MB_BMC3:   //MB BMC3
     case BRIDGE_2_ASIC_BMC:  //FBEP
+    case BRIDGE_2_IOX_BMC:   //FBCC
       ret = pal_ipmb_bypass(req_data, req_len, res_data, res_len);
       break;
     case BYPASS_NCSI:
@@ -1673,116 +1752,18 @@ int pal_bypass_cmd(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *re
 int
 pal_convert_to_dimm_str(uint8_t cpu, uint8_t channel, uint8_t slot, char *str) {
   uint8_t idx;
+  uint8_t cpu_num;
   char label[] = {'A','C','B','D'};
 
-  if ((idx = cpu*2+slot) < sizeof(label)) {
+  cpu_num = cpu%2;
+
+  if ((idx = cpu_num*2+slot) < sizeof(label)) {
     sprintf(str, "%c%d", label[idx], channel);
   } else {
     sprintf(str, "NA");
   }
 
   return 0;
-}
-
-int
-pal_get_pfr_address(uint8_t fru, uint8_t *bus, uint8_t *addr, bool *bridged) {
-  if ((fru != FRU_MB) && (fru != FRU_BMC)) {
-    return -1;
-  }
-  *bus = PFR_MAILBOX_BUS;
-  *addr = PFR_MAILBOX_ADDR;
-  *bridged = false;
-  return 0;
-}
-
-int
-pal_fw_update_finished(uint8_t fru, const char *comp, int status) {
-  int ret, ifd, retry = 3;
-  uint8_t buf[8];
-  char dev_i2c[16];
-
-  ret = status;
-  if (ret) {
-    return ret;
-  }
-
-  sync();
-  sleep(2);
-  printf("sending update intent to CPLD...\n");
-  fflush(stdout);
-
-  sprintf(dev_i2c, "/dev/i2c-%d", PFR_MAILBOX_BUS);
-  ifd = open(dev_i2c, O_RDWR);
-  if (ifd < 0) {
-    return -1;
-  }
-
-  buf[0] = 0x13;  // BMC update intent
-  if (!strcmp(comp, "bios")) {
-    buf[1] = UPDATE_UPDATE_DYNAMIC | UPDATE_PCH_ACTIVE;
-  } else if (!strcmp(comp, "bios_rc")) {
-    buf[1] = UPDATE_PCH_RECOVERY;
-  } else if (!strcmp(comp, "pfr_cpld")) {
-    buf[1] = UPDATE_CPLD_ACTIVE;
-  } else if (!strcmp(comp, "pfr_cpld_rc")) {
-    buf[1] = UPDATE_CPLD_RECOVERY;
-  } else {
-    close(ifd);
-    return -1;
-  }
-
-  if (!pal_get_config_is_master()) {
-    buf[1] |= UPDATE_AT_RESET;
-  }
-
-  do {
-    ret = i2c_rdwr_msg_transfer(ifd, PFR_MAILBOX_ADDR, buf, 2, NULL, 0);
-    if (ret) {
-      syslog(LOG_WARNING, "send update intent failed, cmd: %02x %02x", buf[0], buf[1]);
-      if (--retry > 0)
-        msleep(100);
-    }
-  } while (ret && retry > 0);
-  close(ifd);
-
-  return ret;
-}
-
-int
-pal_is_pfr_active(void) {
-  int ifd, retry = 3;
-  uint8_t tbuf[8], rbuf[8];
-  char dev_i2c[16];
-  static bool cached = false;
-  static int pfr_active = PFR_NONE;
-
-  if (cached) {
-    return pfr_active;
-  }
-
-  sprintf(dev_i2c, "/dev/i2c-%d", PFR_MAILBOX_BUS);
-  ifd = open(dev_i2c, O_RDWR);
-  if (ifd < 0) {
-    return pfr_active;
-  }
-
-  tbuf[0] = 0x0A;
-  do {
-    if (!i2c_rdwr_msg_transfer(ifd, PFR_MAILBOX_ADDR, tbuf, 1, rbuf, 1)) {
-      pfr_active = (rbuf[0] & 0x20) ? PFR_ACTIVE : PFR_UNPROVISIONED;
-      break;
-    }
-
-#ifdef DEBUG
-    syslog(LOG_WARNING, "i2c%u xfer failed, cmd: %02x", 4, tbuf[0]);
-#endif
-    if (--retry > 0)
-      msleep(20);
-  } while (retry > 0);
-  close(ifd);
-  cached = true;
-
-  return pfr_active;
 }
 
 int
@@ -1813,7 +1794,7 @@ pal_get_cpu_amount(uint8_t* amount) {
     if (ret != 0) {
       syslog(LOG_WARNING,"%s Wrong get system mode\n", __func__);
       return ret;
-    } 
+    }
 
     if( mode == MB_2S_MODE ) {
       cache_amount = 2;
@@ -1842,7 +1823,7 @@ pal_get_dimm_amount(uint8_t* amount) {
     if (ret != 0) {
       syslog(LOG_WARNING,"%s Wrong get system mode\n", __func__);
       return ret;
-    } 
+    }
 
     if( mode == MB_2S_MODE ) {
       cache_amount = 24;
@@ -1860,8 +1841,8 @@ pal_get_dimm_amount(uint8_t* amount) {
   return 0;
 }
 
-static bool
-is_cpu_socket_occupy(unsigned int cpu_idx) {
+bool
+is_cpu_socket_occupy(uint8_t cpu_idx) {
   static bool cached = false;
   static unsigned int cached_id = 0;
 
@@ -1884,8 +1865,7 @@ is_cpu_socket_occupy(unsigned int cpu_idx) {
 }
 
 int
-pal_get_syscfg_text (char *text) {
-  int rev;
+pal_get_syscfg_text(char *text) {
   int cnt=0;
   char key[MAX_KEY_LEN], value[MAX_VALUE_LEN], entry[MAX_VALUE_LEN];
   char *key_prefix = "sys_config/";
@@ -1896,7 +1876,7 @@ pal_get_syscfg_text (char *text) {
   uint8_t cpu_index=0;
   uint8_t cpu_core_num=0;
   float cpu_speed=0;
- 
+
   uint8_t dimm_num=0;
   uint8_t dimm_index=0;
   uint16_t dimm_speed=0;
@@ -1918,13 +1898,13 @@ pal_get_syscfg_text (char *text) {
   }
 
   if(pal_get_dimm_amount(&dimm_num)) {
-    return -1; 
+    return -1;
   }
 
   // CPU information
   for (cpu_index = 0; cpu_index < cpu_num; cpu_index++) {
     if(cpu_num == 2) {
-      if (!is_cpu_socket_occupy((unsigned int)cpu_index))
+      if (!is_cpu_socket_occupy(cpu_index))
         continue;
     }
     sprintf(entry, "CPU%d:", cpu_index);
@@ -1961,7 +1941,7 @@ pal_get_syscfg_text (char *text) {
 
   for (dimm_index=0; dimm_index<dimm_num; dimm_index++) { // 2S:DIMM=24, 4S:DIMM=48, 8S:DIMM=96;
     sprintf(entry, "CPU%d_MEM%s:", dimm_index/12, dimm_label[dimm_index%24]);
-  
+
     // Check Present
     snprintf(key, MAX_KEY_LEN, "%sfru1_dimm%d_location", key_prefix, dimm_index);
     if(kv_get(key, value, &ret, KV_FPERSIST) == 0 && ret >= 1) {
@@ -1970,7 +1950,7 @@ pal_get_syscfg_text (char *text) {
       if (value[0] != 0x01)
         continue;
     }
-  
+
     // Module Manufacturer ID
     snprintf(key, MAX_KEY_LEN, "%sfru1_dimm%d_manufacturer_id", key_prefix, dimm_index);
     if(kv_get(key, value, &ret, KV_FPERSIST) == 0 && ret >= 2) {
@@ -1989,15 +1969,15 @@ pal_get_syscfg_text (char *text) {
           break;
       }
     }
-  
+
     // Speed
     snprintf(key, MAX_KEY_LEN, "%sfru1_dimm%d_speed",key_prefix, dimm_index);
     if(kv_get(key, value, &ret, KV_FPERSIST) == 0 && ret >= 6) {
       dimm_speed =  value[1]<<8 | value[0];
-      dimm_capacity = (value[5]<<24 | value[4]<<16 | value[3]<<8 | value[2])/1024; 
+      dimm_capacity = (value[5]<<24 | value[4]<<16 | value[3]<<8 | value[2])/1024;
       sprintf(&entry[strlen(entry)], "%dMhz/%dGB", dimm_speed, dimm_capacity);
     }
-  
+
     sprintf(&entry[strlen(entry)], "\n");
     strcat(text, entry);
   }
@@ -2021,16 +2001,178 @@ void pal_get_eth_intf_name(char* intf_name)
 }
 
 void
-pal_set_post_end(uint8_t slot, uint8_t *req_data, uint8_t *res_data, uint8_t *res_len) 
+pal_set_post_end(uint8_t slot, uint8_t *req_data, uint8_t *res_data, uint8_t *res_len)
 {
   // log the post end event
   syslog (LOG_INFO, "POST End Event for Payload#%d\n", slot);
-  
+
   // Sync time with system
   if (system("/etc/init.d/sync_date.sh &") != 0) {
     syslog(LOG_ERR, "Sync date failed!\n");
   } else {
-    syslog(LOG_INFO, "Sync date success!\n"); 
+    syslog(LOG_INFO, "Sync date success!\n");
   }
 }
 
+int
+pal_get_nic_fru_id(void)
+{
+  return FRU_NIC0;
+}
+
+int
+pal_get_target_bmc_addr(uint8_t *tar_bmc_addr) {
+  uint16_t m_bmc_addr;
+
+  if ( pal_get_bmc_ipmb_slave_addr(&m_bmc_addr, BMC_IPMB_BUS_ID) )
+    return -1;
+
+  if (m_bmc_addr == 0x10)
+    *tar_bmc_addr = BMC1_SLAVE_DEF_ADDR;
+  else
+    *tar_bmc_addr = BMC0_SLAVE_DEF_ADDR;
+
+  return 0;
+}
+
+int
+pal_get_sensor_util_timeout(uint8_t fru) {
+
+  if ( fru == FRU_MB ) {
+    return 10;
+  } else {
+    return 4;
+  }
+}
+
+static int get_cpld_version(char* str, uint8_t addr, uint8_t bus,
+                            uint32_t offset, uint8_t* rbuf)
+{
+  int fd = 0, ret = -1;
+  uint8_t tlen, rlen;
+  uint8_t tbuf[16] = {0};
+  uint8_t ver[16] = {0};
+  long rev;
+  char value[MAX_VALUE_LEN] = {0};
+
+  if( kv_get(str, value, 0, 0) ) {
+    fd = i2c_cdev_slave_open(bus, addr >> 1, I2C_SLAVE_FORCE_CLAIM);
+    if (fd < 0) {
+      syslog(LOG_WARNING, "%s() Failed to open %d", __func__, bus);
+      return ret;
+    }
+
+    tbuf[0] = (offset >> 24 ) & 0xFF;
+    tbuf[1] = (offset >> 16 ) & 0xFF;
+    tbuf[2] = (offset >> 8 )  & 0xFF;
+    tbuf[3] = (offset >> 0 )  & 0xFF;
+
+    tlen = 4;
+    rlen = 4;
+
+    ret = i2c_rdwr_msg_transfer(fd, addr, tbuf, tlen, ver, rlen);
+    i2c_cdev_slave_close(fd);
+
+    if (ret == -1) {
+      syslog(LOG_WARNING, "%s bus=%x slavaddr=%x offset=%x\n", __func__, bus, addr >> 1, offset);
+      return ret;
+    } else {
+      sprintf(value, "%02x%02x%02x%02x", ver[3], ver[2], ver[1], ver[0]);
+      kv_set(str, value, 0, 0);
+      rbuf[0] = ver[3];
+      rbuf[1] = ver[2];
+      rbuf[2] = ver[1];
+      rbuf[3] = ver[0];
+    }
+  } else {
+    rev = strtol(value, NULL, 16);
+    rbuf[0] = (rev >> 24) & 0xff;
+    rbuf[1] = (rev >> 16) & 0xff;
+    rbuf[2] = (rev >> 8) & 0xff;
+    rbuf[3] = (rev >> 0) & 0xff;
+  }
+  return 0;
+}
+
+int
+pal_get_fw_info(uint8_t fru, unsigned char target, unsigned char* res, unsigned char* res_len) {
+  int ret = -1;
+  uint8_t rbuf[16] = {0};
+  char str[16] = {0};
+
+  if( fru != FRU_MB )
+    return -1;
+
+  switch (target) {
+    case CMD_GET_MAIN_CPLD_VER:
+      strncpy(str, "pfr_cpld", sizeof(str));
+      ret = get_cpld_version(str, MAIN_CPLD_SLV_ADDR, MAIN_CPLD_BUS_NUM, CPLD_VER_REG, rbuf);
+    break;
+    case CMD_GET_MOD_CPLD_VER:
+      strncpy(str, "mod_cpld", sizeof(str));
+      ret = get_cpld_version(str, MOD_CPLD_SLV_ADDR, MOD_CPLD_BUS_NUM, CPLD_VER_REG, rbuf);
+    break;
+    case CMD_GET_GLB_CPLD_VER:
+      strncpy(str, "glb_cpld", sizeof(str));
+      ret = get_cpld_version(str, GLB_CPLD_SLV_ADDR, GLB_CPLD_BUS_NUM, CPLD_VER_REG, rbuf);
+    break;
+    default:
+      return -1;
+  }
+
+  if( ret == 0 ) {
+    memcpy(res, rbuf, 4);
+    *res_len = 4;
+  }
+
+  return ret;
+}
+
+void __attribute__((constructor))
+update_local_fruid(void) {
+  if (!pal_get_config_is_master()) {
+    FRU_MB = FRU_TRAY1_MB;
+    FRU_NIC0 = FRU_TRAY1_NIC0;
+    FRU_NIC1 = FRU_TRAY1_NIC1;
+    FRU_BMC = FRU_TRAY1_BMC;
+  }
+}
+
+int pal_get_fru_capability(uint8_t fru, unsigned int *caps)
+{
+  int ret = 0;
+  switch (fru) {
+    case FRU_TRAY0_MB:
+    case FRU_TRAY1_MB:
+      *caps =  FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SERVER |
+          FRU_CAPABILITY_SENSOR_ALL | FRU_CAPABILITY_POWER_ALL;
+      break;
+    case FRU_TRAY0_NIC0:
+    case FRU_TRAY0_NIC1:
+    case FRU_TRAY1_NIC0:
+    case FRU_TRAY1_NIC1:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL |
+        FRU_CAPABILITY_NETWORK_CARD;
+      break;
+    case FRU_PDB:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL;
+      break;
+    case FRU_DBG:
+      *caps = FRU_CAPABILITY_SENSOR_ALL;
+      break;
+    case FRU_TRAY0_BMC:
+    case FRU_TRAY1_BMC:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL |
+        FRU_CAPABILITY_MANAGEMENT_CONTROLLER;
+      break;
+    default:
+      ret = -1;
+      break;
+  }
+  return ret;
+}
+
+int pal_get_dev_capabilities(uint8_t fru, uint8_t dev, unsigned int *caps)
+{
+  return -1;
+}

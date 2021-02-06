@@ -33,12 +33,14 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/facebook/openbmc/tools/flashy/lib/fileutils"
 	"github.com/pkg/errors"
+	"github.com/vtolstov/go-ioctl"
 )
 
-// memory information in bytes
+// MemInfo represents memory information in bytes.
 type MemInfo struct {
 	MemTotal uint64
 	MemFree  uint64
@@ -46,6 +48,7 @@ type MemInfo struct {
 
 const ProcMtdFilePath = "/proc/mtd"
 const etcIssueFilePath = "/etc/issue"
+const procMountsPath = "/proc/mounts"
 
 // other flashers + the "flashy" binary
 var otherFlasherBaseNames = []string{
@@ -70,9 +73,9 @@ var ownCmdlines = []string{
 	fmt.Sprintf("/proc/%v/cmdline", os.Getpid()),
 }
 
-// get memInfo
-// note that this assumes kB units for MemFree and MemTotal
-// it will fail otherwise
+// GetMemInfo gets MemInfo from /proc/meminfo.
+// Note that this assumes kB units for MemFree and MemTotal
+// and will fail otherwise.
 var GetMemInfo = func() (*MemInfo, error) {
 	buf, err := fileutils.ReadFile("/proc/meminfo")
 	if err != nil {
@@ -139,10 +142,10 @@ func scanLinesRN(data []byte, atEOF bool) (advance int, token []byte, err error)
 	return 0, nil, nil
 }
 
-// function to aid logging and saving live stdout and stderr output
-// from running command
-// note that sequential execution is not guaranteed - race conditions
-// might still exist
+// logScanner is a function to aid logging and saving live stdout and stderr output
+// from a running command.
+// Note that sequential execution is not guaranteed - race conditions
+// might still exist.
 func logScanner(s *bufio.Scanner, ch chan struct{}, pre string, str *string) {
 	s.Split(scanLinesRN)
 	for s.Scan() {
@@ -153,9 +156,9 @@ func logScanner(s *bufio.Scanner, ch chan struct{}, pre string, str *string) {
 	close(ch)
 }
 
-// runs command and pipes live output
-// returns exitcode, error, stdout (string), stderr (string) if non-zero/error returned or timed out
-// returns 0, nil, stdout (string), stderr (string) if successfully run
+// RunCommand runs command and pipes live output.
+// Returns exitcode, error, stdout (string), stderr (string) if non-zero/error returned or timed out.
+// Returns 0, nil, stdout (string), stderr (string) if successfully run.
 var RunCommand = func(cmdArr []string, timeout time.Duration) (int, error, string, string) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -215,9 +218,9 @@ var RunCommand = func(cmdArr []string, timeout time.Duration) (int, error, strin
 	return exitCode, err, stdoutStr, stderrStr
 }
 
-// calls RunCommand repeatedly until succeeded or maxAttempts is reached
-// between attempts, an interval is applied
-// returns the results from the first succeeding run or last tried run
+// RunCommandWithRetries calls RunCommand repeatedly until succeeded or maxAttempts is reached.
+// Between attempts, an interval is applied.
+// Returns the results from the first succeeding run or last tried run.
 var RunCommandWithRetries = func(cmdArr []string, timeout time.Duration, maxAttempts int, interval time.Duration) (int, error, string, string) {
 	exitCode, err, stdoutStr, stderrStr := 1, errors.Errorf("Command failed to run"), "", ""
 
@@ -239,7 +242,7 @@ var RunCommandWithRetries = func(cmdArr []string, timeout time.Duration, maxAtte
 			log.Printf("Attempt %v of %v failed", attempt, maxAttempts)
 			if attempt < maxAttempts {
 				log.Printf("Sleeping for %v before retrying", interval)
-				sleepFunc(interval)
+				Sleep(interval)
 			} else {
 				log.Printf("Max attempts (%v) reached. Returning with error.", maxAttempts)
 			}
@@ -248,7 +251,7 @@ var RunCommandWithRetries = func(cmdArr []string, timeout time.Duration, maxAtte
 	return exitCode, err, stdoutStr, stderrStr
 }
 
-// check whether systemd is available
+// SystemdAvailable checks whether systemd is available.
 var SystemdAvailable = func() (bool, error) {
 	const cmdlinePath = "/proc/1/cmdline"
 
@@ -267,10 +270,10 @@ var SystemdAvailable = func() (bool, error) {
 	return false, nil
 }
 
-// get OpenBMC version from /etc/issue
+// GetOpenBMCVersionFromIssueFile gets OpenBMC version from /etc/issue.
 // examples: fbtp-v2020.09.1, wedge100-v2020.07.1
 // WARNING: There is no guarantee that /etc/issue is well-formed
-// in old images
+// in old images.
 var GetOpenBMCVersionFromIssueFile = func() (string, error) {
 	const etcIssueVersionRegEx = `^OpenBMC Release (?P<version>[^\s]+)`
 
@@ -294,8 +297,8 @@ var GetOpenBMCVersionFromIssueFile = func() (string, error) {
 	return version, nil
 }
 
-// check whether the system is indeed an OpenBMC
-// by checking whether the string "OpenBMC" exists in /etc/issue
+// IsOpenBMC check whether the system is an OpenBMC
+// by checking whether the string "OpenBMC" exists in /etc/issue.
 var IsOpenBMC = func() (bool, error) {
 	const magic = "OpenBMC"
 
@@ -309,9 +312,9 @@ var IsOpenBMC = func() (bool, error) {
 	return isOpenBMC, nil
 }
 
-// return error if any other flashers are running.
-// takes in the baseNames of all flashy's steps (e.g. 00_truncate_logs)
-// to make sure no other instance of flashy is running
+// CheckOtherFlasherRunning return an error if any other flashers are running.
+// It takes in the baseNames of all flashy's steps (e.g. 00_truncate_logs)
+// to make sure no other instance of flashy is running.
 var CheckOtherFlasherRunning = func(flashyStepBaseNames []string) error {
 	allFlasherBaseNames := SafeAppendString(otherFlasherBaseNames, flashyStepBaseNames)
 
@@ -333,7 +336,21 @@ var getOtherProcCmdlinePaths = func() []string {
 	return otherCmdlines
 }
 
-// return error if a basename is found running in a proc/*/cmdline file
+// Examine arguments for well known base names and refine the match.
+var refineBaseNameMatch = func(baseName string, params []string) bool {
+	if baseName == "fw-util" {
+		// ignore fw-util unless doing an update.
+		return StringFind("--update", params) >= 0
+	} else if baseName == "flashrom" {
+		// ignore flashrom if it's just reading.
+		return StringFind("-r", params) == -1
+	} else {
+		// default: finding the name is enough
+		return true
+	}
+}
+
+// checkNoBaseNameExistsInProcCmdlinePaths returns error if a basename is found running in a proc/*/cmdline file
 var checkNoBaseNameExistsInProcCmdlinePaths = func(baseNames, procCmdlinePaths []string) error {
 	for _, procCmdlinePath := range procCmdlinePaths {
 		cmdlineBuf, err := fileutils.ReadFile(procCmdlinePath)
@@ -347,7 +364,7 @@ var checkNoBaseNameExistsInProcCmdlinePaths = func(baseNames, procCmdlinePaths [
 		params := strings.Split(string(cmdlineBuf), "\x00")
 		for _, param := range params {
 			baseName := path.Base(param)
-			if StringFind(baseName, baseNames) >= 0 {
+			if StringFind(baseName, baseNames) >= 0 && refineBaseNameMatch(baseName, params) {
 				return errors.Errorf("'%v' found in cmdline '%v'",
 					baseName, strings.Join(params, " "))
 			}
@@ -357,8 +374,8 @@ var checkNoBaseNameExistsInProcCmdlinePaths = func(baseNames, procCmdlinePaths [
 	return nil
 }
 
-// GetMtdMap gets a map containing [dev, size, erasesize] values
-// for the mtd device specifier. Information is obtained from /proc/mtd
+// GetMTDMapFromSpecifier gets a map containing [dev, size, erasesize] values
+// for the mtd device specifier. Information is obtained from /proc/mtd.
 var GetMTDMapFromSpecifier = func(deviceSpecifier string) (map[string]string, error) {
 	// read from /proc/mtd
 	procMTDBuf, err := fileutils.ReadFile(ProcMtdFilePath)
@@ -376,4 +393,67 @@ var GetMTDMapFromSpecifier = func(deviceSpecifier string) (map[string]string, er
 			deviceSpecifier)
 	}
 	return mtdMap, nil
+}
+
+// IsDataPartitionMounted checks if /mnt/data is mounted
+var IsDataPartitionMounted = func() (bool, error) {
+	procMountsDat, err := fileutils.ReadFile(procMountsPath)
+	if err != nil {
+		return false, errors.Errorf("Cannot read /proc/mounts: %v", err)
+	}
+
+	regEx := `(?m)^[^ ]+ /mnt/data [^ ]+ [^ ]+ [0-9]+ [0-9]+$`
+	regExMap, err := GetAllRegexSubexpMap(regEx, string(procMountsDat))
+	if err != nil {
+		return false, errors.Errorf("regex error: %v", err)
+	}
+
+	return len(regExMap) != 0, nil
+}
+
+func tryPetWatchdog() bool {
+	var WDIOC_KEEPALIVE = ioctl.IOR('W', 5, 4)
+	var WDIOC_SETTIMEOUT = ioctl.IOWR('W', 6, 4)
+
+	f, err := os.OpenFile("/dev/watchdog", os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+
+	// Extend the timeout.  The kernel may adjust the timeout downward
+	// if a hardware watchdog is in use.  In any case, don't arrange to
+	// restore the original timeout value because the current design for
+	// flashy is that the system will reboot afterwards.
+	timo := int32(300)
+	err2 := ioctl.IOCTL(f.Fd(), WDIOC_SETTIMEOUT, uintptr(unsafe.Pointer(&timo)))
+	if err2 != nil {
+		log.Printf("ioctl WDIOC_SETTIMEOUT failed: %v", err2)
+	}
+
+	err3 := ioctl.IOCTL(f.Fd(), WDIOC_KEEPALIVE, uintptr(0))
+	if err3 != nil {
+		log.Printf("ioctl WDIOC_KEEPALIVE failed: %v", err3)
+	}
+	f.Close()
+	return err2 == nil && err3 == nil
+}
+
+// Try to pet the watchdog and increase its timeout.  This works in two ways:
+//
+// - When /dev/watchdog is busy because it's held open by healthd, the delay
+//   here will hopefully allow healthd's watchdog thread to get some CPU
+//   time.
+//   
+// - When /dev/watchdog it NOT busy because healthd is not running and there
+//   are no concurrent instances of wdtcli, the watchdog timeout will be
+//   extended and the watchdog petted.
+var PetWatchdog = func() {
+	for i := 0; i < 10; i++ {
+		if tryPetWatchdog() {
+			log.Printf("Watchdog petted")
+			return;
+		}
+		time.Sleep(1)
+	}
+	log.Printf("Watchdog not petted; yielded CPU instead")
 }

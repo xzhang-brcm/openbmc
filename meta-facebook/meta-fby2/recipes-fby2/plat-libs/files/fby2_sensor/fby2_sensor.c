@@ -38,6 +38,7 @@
 #include <openbmc/nvme-mi.h>
 #include <openbmc/libgpio.h>
 
+#define LARGEST_FILEPATH_LEN 256
 #define LARGEST_DEVICE_NAME 120
 
 #define MEZZ_TEMP_DEVICE "/sys/class/i2c-adapter/i2c-11/11-001f/hwmon/hwmon*"
@@ -154,8 +155,10 @@ const uint8_t bic_nd_neg_reading_sensor_support_list[] = {
   BIC_ND_SENSOR_PVDDIO_EFGH_VR_T,
   BIC_ND_SENSOR_PVDDCR_SOC_VR_T,
   BIC_ND_SENSOR_SOC_TEMP,
+  BIC_ND_SENSOR_SOC_DIMMA0_TEMP,
   BIC_ND_SENSOR_SOC_DIMMC0_TEMP,
   BIC_ND_SENSOR_SOC_DIMMD0_TEMP,
+  BIC_ND_SENSOR_SOC_DIMME0_TEMP,
   BIC_ND_SENSOR_SOC_DIMMG0_TEMP,
   BIC_ND_SENSOR_SOC_DIMMH0_TEMP,
   HOST_BOOT_DRIVE_TEMP,
@@ -620,8 +623,10 @@ const uint8_t bic_nd_sensor_list[] = {
   BIC_ND_SENSOR_PVDDIO_EFGH_VR_T,
   BIC_ND_SENSOR_PVDDCR_SOC_VR_T,
   BIC_ND_SENSOR_SOC_TEMP,
+  BIC_ND_SENSOR_SOC_DIMMA0_TEMP,
   BIC_ND_SENSOR_SOC_DIMMC0_TEMP,
   BIC_ND_SENSOR_SOC_DIMMD0_TEMP,
+  BIC_ND_SENSOR_SOC_DIMME0_TEMP,
   BIC_ND_SENSOR_SOC_DIMMG0_TEMP,
   BIC_ND_SENSOR_SOC_DIMMH0_TEMP,
   BIC_ND_SENSOR_SOC_Package_Pwr,
@@ -816,7 +821,7 @@ sensor_thresh_array_init() {
   spb_sensor_threshold[SP_SENSOR_HSC_IN_VOLT][UCR_THRESH] = 13.75;
   spb_sensor_threshold[SP_SENSOR_HSC_IN_VOLT][LCR_THRESH] = 11.25;
   spb_sensor_threshold[SP_SENSOR_HSC_TEMP][UCR_THRESH] = 120;
-  if (spb_type == TYPE_SPB_YV2ND) {
+  if (spb_type == TYPE_SPB_YV2ND || spb_type == TYPE_SPB_YV2ND2) {
     if ((fby2_get_slot_type(FRU_SLOT1)==SLOT_TYPE_GPV2) || (fby2_get_slot_type(FRU_SLOT3) == SLOT_TYPE_GPV2)) { // For GPv2 case
       spb_sensor_threshold[SP_SENSOR_HSC_OUT_CURR][UCR_THRESH] = 63;
       spb_sensor_threshold[SP_SENSOR_HSC_IN_POWER][UCR_THRESH] = 756;
@@ -1216,7 +1221,10 @@ get_current_dir(const char *device, char *dir_name) {
   fp = popen(cmd, "r");
   if(NULL == fp)
      return -1;
-  fgets(dir_name, LARGEST_DEVICE_NAME, fp);
+  if (fgets(dir_name, LARGEST_DEVICE_NAME, fp) == NULL) {
+    pclose(fp);
+    return -1;
+  }
 
   ret = pclose(fp);
   if(-1 == ret)
@@ -1232,7 +1240,7 @@ get_current_dir(const char *device, char *dir_name) {
 
 static int
 read_temp_attr(const char *device, const char *attr, float *value) {
-  char full_dir_name[LARGEST_DEVICE_NAME + 1];
+  char full_dir_name[LARGEST_FILEPATH_LEN + 1];
   char dir_name[LARGEST_DEVICE_NAME + 1];
   int tmp;
 
@@ -1242,7 +1250,7 @@ read_temp_attr(const char *device, const char *attr, float *value) {
     return -1;
   }
   snprintf(
-      full_dir_name, LARGEST_DEVICE_NAME, "%s/%s", dir_name, attr);
+      full_dir_name, LARGEST_FILEPATH_LEN, "%s/%s", dir_name, attr);
 
 
   if (read_device(full_dir_name, &tmp)) {
@@ -1267,10 +1275,10 @@ read_fan_value(const int fan, const char *device, float *value) {
   sprintf(device_name, "fan%d", fan + 1);
   return sensors_read_fan(device_name, value);
 #else
-  char full_name[LARGEST_DEVICE_NAME];
+  char full_name[LARGEST_FILEPATH_LEN];
 
   snprintf(device_name, LARGEST_DEVICE_NAME, device, fan);
-  snprintf(full_name, LARGEST_DEVICE_NAME, "%s/%s", TACH_DIR, device_name);
+  snprintf(full_name, LARGEST_FILEPATH_LEN, "%s/%s", TACH_DIR, device_name);
   return read_device_float(full_name, value);
 #endif
 }
@@ -1347,7 +1355,7 @@ read_pwm_value(uint8_t fan_num, uint8_t* pwm) {
 #else
 int
 read_pwm_value(uint8_t fan_num, uint8_t* value) {
-  char path[LARGEST_DEVICE_NAME] = {0};
+  char path[LARGEST_FILEPATH_LEN] = {0};
   char device_name[LARGEST_DEVICE_NAME] = {0};
   int val = 0;
   int pwm_enable = 0;
@@ -1384,7 +1392,7 @@ read_pwm_value(uint8_t fan_num, uint8_t* value) {
 
   // Need check pwmX_en to determine the PWM is 0 or 100.
   snprintf(device_name, LARGEST_DEVICE_NAME, "pwm%d_en", fan_num);
-  snprintf(path, LARGEST_DEVICE_NAME, "%s/%s", PWM_DIR, device_name);
+  snprintf(path, LARGEST_FILEPATH_LEN, "%s/%s", PWM_DIR, device_name);
   if (read_device(path, &pwm_enable)) {
     syslog(LOG_INFO, "%s: read %s failed", __FUNCTION__, path);
     return -1;
@@ -1392,7 +1400,7 @@ read_pwm_value(uint8_t fan_num, uint8_t* value) {
 
   if(pwm_enable) {
     snprintf(device_name, LARGEST_DEVICE_NAME, "pwm%d_falling", fan_num);
-    snprintf(path, LARGEST_DEVICE_NAME, "%s/%s", PWM_DIR, device_name);
+    snprintf(path, LARGEST_FILEPATH_LEN, "%s/%s", PWM_DIR, device_name);
     if (read_device_hex(path, &val)) {
       syslog(LOG_INFO, "%s: read %s failed", __FUNCTION__, path);
       return -1;
@@ -1448,10 +1456,10 @@ read_adc_value(uint8_t adc_id, float *value) {
 static int
 read_adc_value(const int pin, const char *device, float *value) {
   char device_name[LARGEST_DEVICE_NAME];
-  char full_name[LARGEST_DEVICE_NAME];
+  char full_name[LARGEST_FILEPATH_LEN];
 
   snprintf(device_name, LARGEST_DEVICE_NAME, device, pin);
-  snprintf(full_name, LARGEST_DEVICE_NAME, "%s/%s", ADC_DIR, device_name);
+  snprintf(full_name, LARGEST_FILEPATH_LEN, "%s/%s", ADC_DIR, device_name);
   return read_device_float(full_name, value);
 }
 #endif

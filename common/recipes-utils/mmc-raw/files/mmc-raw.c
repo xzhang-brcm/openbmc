@@ -32,6 +32,7 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <linux/fs.h>
+#include <regex.h>
 
 #include "mmc.h"
 
@@ -743,6 +744,56 @@ static int mmc_read_report_cmd_sk(struct m_cmd_args *cmd_args)
         return 0;
 }
 
+static void regex_extract(char * buf, char * data, const char * pattern,
+			  size_t matchId)
+{
+	int status;
+	int cflags = REG_EXTENDED | REG_ICASE;
+	const size_t nmatch = 10;
+	regmatch_t pmatch[nmatch];
+	regex_t reg;
+
+	regcomp(&reg, pattern, cflags);
+	status = regexec(&reg, data, nmatch, pmatch, 0);
+	if (status == REG_NOMATCH) {
+		buf[0] = '\0';
+	} else if (status == 0) {
+		int len = pmatch[matchId].rm_eo - pmatch[matchId].rm_so;
+
+		strncpy(buf, data + pmatch[matchId].rm_so, len);
+		buf[len] = '\0';
+	}
+
+	regfree(&reg);
+}
+
+static int mmc_bus_width_debugfs(__u8 *width)
+{
+	FILE *fp;
+	int ret = -1;
+	char data[1024];
+	const char *path = "/sys/kernel/debug/mmc0/ios";
+	const char *pattern = "bus width:\t([0-9]+)";
+
+	fp = fopen(path, "r");
+	if (fp == NULL)
+		return -1;
+
+	if (fread(data, sizeof(data), 1, fp) == 1) {
+		char buf[1024];
+
+		buf[0] = '\0';
+		data[sizeof(data) - 1] = '\0';
+		regex_extract(buf, data, pattern, 1);
+		if (strlen(buf) > 0) {
+			*width = (__u8)atoi(buf) - 1;
+			ret = 0;
+		}
+	}
+
+	fclose(fp);
+	return ret;
+}
 
 static char *mmc_extcsd_rev(__u8 rev, char *buf, size_t size)
 {
@@ -910,7 +961,9 @@ static void mmc_dump_misc_info(__u8 *extcsd)
 	char buf[NAME_MAX];
 	__u8 width, rst_n, cache_ctrl;
 
-	width = extcsd[EXT_CSD_BUS_WIDTH];
+	if (mmc_bus_width_debugfs(&width) != 0) {
+		width = extcsd[EXT_CSD_BUS_WIDTH];
+	}
 	MMC_INFO("- Bus Width: %s\n",
 		mmc_bus_width(width, buf, sizeof(buf)));
 

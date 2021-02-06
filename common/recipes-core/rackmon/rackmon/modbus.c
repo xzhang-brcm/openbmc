@@ -18,7 +18,6 @@
 
 #include <time.h>
 #include "modbus.h"
-#include <termios.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <stdlib.h>
@@ -65,6 +64,30 @@ void append_modbus_crc16(char* buf, size_t* len) {
 void print_hex(FILE* f, char* buf, size_t len) {
   for(int i = 0; i < len; i++)
     fprintf(f, "%02x ", buf[i]);
+}
+
+const char* baud_to_str(speed_t baudrate) {
+  char* out = "<unknown>";
+  switch (baudrate) {
+    case B0:       out = "none"; break;
+    case B50:      out = "50"; break;
+    case B110:     out = "110"; break;
+    case B134:     out = "134"; break;
+    case B150:     out = "150"; break;
+    case B200:     out = "200"; break;
+    case B300:     out = "300"; break;
+    case B600:     out = "600"; break;
+    case B1200:    out = "1200"; break;
+    case B1800:    out = "1800"; break;
+    case B2400:    out = "2400"; break;
+    case B4800:    out = "4800"; break;
+    case B9600:    out = "9600"; break;
+    case B19200:   out = "19200"; break;
+    case B38400:   out = "38400"; break;
+    case B57600:   out = "57600"; break;
+    case B115200:  out = "115200"; break;
+  }
+  return out;
 }
 
 size_t read_wait(int fd, char* dst, size_t maxlen, int mdelay_us) {
@@ -190,18 +213,18 @@ static long crcfail = 0;
 static long timeout = 0;
 static long stat_wait = 0;
 
-int modbuscmd(modbus_req *req) {
+int modbuscmd(modbus_req *req, speed_t baudrate) {
     int error = 0;
     struct termios tio;
     char modbus_cmd[req->cmd_len + 2];
     size_t cmd_len = req->cmd_len;
 
     if (verbose)
-      fprintf(stderr, "[*] Setting TTY flags!\n");
+      OBMC_INFO("[*] Setting TTY flags!\n");
     memset(&tio, 0, sizeof(tio));
     // CREAD should be left *off* until we've confirmed THRE
     // to avoid catching false character starts
-    cfsetspeed(&tio,B19200);
+    cfsetspeed(&tio,baudrate);
     tio.c_cflag |= PARENB;
     tio.c_cflag |= CLOCAL;
     tio.c_cflag |= CS8;
@@ -215,9 +238,9 @@ int modbuscmd(modbus_req *req) {
 
     // print command as sent
     if (verbose)  {
-      fprintf(stderr, "Will send:  ");
+      OBMC_INFO("Will send:  ");
       print_hex(stderr, modbus_cmd, cmd_len);
-      fprintf(stderr, "\n");
+      OBMC_INFO("at baudrate %s\n", baud_to_str(baudrate));
     }
 
     dbg("[*] Writing!\n");
@@ -238,7 +261,9 @@ int modbuscmd(modbus_req *req) {
     struct timespec wait_end;
     struct timespec read_end;
     clock_gettime(CLOCK_MONOTONIC_RAW, &write_begin);
-    write(req->tty_fd, modbus_cmd, cmd_len);
+    if (write(req->tty_fd, modbus_cmd, cmd_len) < 0) {
+      OBMC_ERROR(errno, "ERROR: could not write modbus cmd");
+    }
     clock_gettime(CLOCK_MONOTONIC_RAW, &wait_begin);
     int waitloops = waitfd(req->tty_fd);
     clock_gettime(CLOCK_MONOTONIC_RAW, &wait_end);
@@ -275,10 +300,10 @@ int modbuscmd(modbus_req *req) {
         dbg("CRC OK!\n");
       } else {
         dbg("BAD CRC :(\n");
-        fprintf(stderr, "bad crc timings:");
-        fprintf(stderr, "  write: %.2f ms", ts_diff(&write_begin, &wait_begin));
-        fprintf(stderr, "  wait: %.2f ms", ts_diff(&wait_begin, &wait_end));
-        fprintf(stderr, "  read: %.2f ms\n", ts_diff(&wait_end, &read_end));
+        dbg("bad crc timings:");
+        dbg("  write: %.2f ms", ts_diff(&write_begin, &wait_begin));
+        dbg("  wait: %.2f ms", ts_diff(&wait_begin, &wait_end));
+        dbg("  read: %.2f ms\n", ts_diff(&wait_end, &read_end));
         if(!req->scan) {
           crcfail++;
         }
@@ -288,11 +313,11 @@ int modbuscmd(modbus_req *req) {
         return MODBUS_BAD_CRC;
       }
     } else {
-      fprintf(stderr, "timeout timings:");
-      fprintf(stderr, "  write: %.2f ms", ts_diff(&write_begin, &wait_begin));
-      fprintf(stderr, "  wait: %.2f ms", ts_diff(&wait_begin, &wait_end));
-      fprintf(stderr, "  wait: %d iters", waitloops);
-      fprintf(stderr, "  read: %.2f ms\n", ts_diff(&wait_end, &read_end));
+      dbg("timeout timings:");
+      dbg("  write: %.2f ms", ts_diff(&write_begin, &wait_begin));
+      dbg("  wait: %.2f ms", ts_diff(&wait_begin, &wait_end));
+      dbg("  wait: %d iters", waitloops);
+      dbg("  read: %.2f ms\n", ts_diff(&wait_end, &read_end));
       dbg("No response :(\n");
       if(!req->scan) {
         timeout++;
@@ -303,23 +328,22 @@ int modbuscmd(modbus_req *req) {
 cleanup:
     if(error != 0) {
       error = -1;
-      fprintf(stderr, "%s\n", strerror(errno));
     } else {
       //fprintf(stderr, "success, timings:");
       //fprintf(stderr, "  write: %.2f ms", ts_diff(&write_begin, &wait_begin));
       //fprintf(stderr, "  wait: %.2f ms", ts_diff(&wait_begin, &wait_end));
       //fprintf(stderr, "  read: %.2f ms -- ", ts_diff(&wait_end, &read_end));
       if(stat_wait == 0 && !req->scan) {
-        fprintf(stderr, "success: %.2f%%  crcfail %.2f%%, timeout %.2f%%\n",
+        dbg("success: %.2f%%  crcfail %.2f%%, timeout %.2f%%\n",
             ((double) 100.0 * success / (success + crcfail + timeout)),
             ((double) 100.0 * crcfail / (success + crcfail + timeout)),
             ((double) 100.0 * timeout / (success + crcfail + timeout)));
         stat_wait = 1000;
-        fprintf(stderr, "success timings:");
-        fprintf(stderr, "  write: %.2f ms", ts_diff(&write_begin, &wait_begin));
-        fprintf(stderr, "  wait: %.2f ms", ts_diff(&wait_begin, &wait_end));
-        fprintf(stderr, "  wait: %d iters", waitloops);
-        fprintf(stderr, "  read: %.2f ms\n", ts_diff(&wait_end, &read_end));
+        dbg("success timings:");
+        dbg("  write: %.2f ms", ts_diff(&write_begin, &wait_begin));
+        dbg("  wait: %.2f ms", ts_diff(&wait_begin, &wait_end));
+        dbg("  wait: %d iters", waitloops);
+        dbg("  read: %.2f ms\n", ts_diff(&wait_end, &read_end));
       } else if (!req->scan) {
         stat_wait--;
       }

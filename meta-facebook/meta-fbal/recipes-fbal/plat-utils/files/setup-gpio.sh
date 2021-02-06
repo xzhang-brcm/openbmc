@@ -113,9 +113,11 @@ gpio_set FM_BMC_PWRBTN_OUT_R_N 1
 
 # JTAG_MUX_SEL_0
 gpio_export JTAG_MUX_SEL_0 GPIOE4
+gpio_set JTAG_MUX_SEL_0 1
 
 # JTAG_MUX_SEL_1
 gpio_export JTAG_MUX_SEL_1 GPIOE5
+gpio_set JTAG_MUX_SEL_1 1
 
 # FP_FAULT_LED_N
 gpio_export FP_FAULT_LED_N GPIOE6
@@ -133,7 +135,6 @@ gpio_export FM_CPU_ERR2_LVT3_N GPIOF2
 
 # FM_BMC_DEBUG_ENABLE_N
 gpio_export FM_BMC_DEBUG_ENABLE_N GPIOF3
-gpio_set FM_BMC_DEBUG_ENABLE_N 1
 
 # FM_BMC_UV_ADR_TRIGGER_EN
 gpio_export FM_BMC_UV_ADR_TRIGGER_EN GPIOF4
@@ -263,8 +264,7 @@ gpio_export FM_SOL_UART_CH_SEL GPION3
 gpio_export IRQ_DIMM_SAVE_LVT3_N GPION4
 
 # LED_8S_2S_MODE_N
-gpio_export LED_8S_2S_MODE_N GPION5
-gpio_set LED_8S_2S_MODE_N 1
+gpio_export LED_4S_2S_MODE_N GPION5
 
 # Set debounce timer #1 value to 0x12E1FC ~= 100ms
 $DEVMEM 0x1e780050 32 0x12E1FC
@@ -386,17 +386,16 @@ gpio_export OCP_V3_NIC_2_PWR_GOOD GPIOT6
 # BOARD_ID_MUX_SEL
 gpio_export BOARD_ID_MUX_SEL GPIOU2
 gpio_set BOARD_ID_MUX_SEL 0
-mkdir -p /tmp/cache_store
-echo $(($(gpio_get FM_BOARD_BMC_REV_ID2)<<2 |
+kv set mb_rev $(($(gpio_get FM_BOARD_BMC_REV_ID2)<<2 |
         $(gpio_get FM_BOARD_BMC_REV_ID1)<<1 |
-        $(gpio_get FM_BOARD_BMC_REV_ID0))) > /tmp/cache_store/mb_rev
+        $(gpio_get FM_BOARD_BMC_REV_ID0)))
 
-echo $(($(gpio_get FM_BOARD_BMC_SKU_ID5)<<5 |
+kv set mb_sku $(($(gpio_get FM_BOARD_BMC_SKU_ID5)<<5 |
         $(gpio_get FM_BOARD_BMC_SKU_ID4)<<4 |
         $(gpio_get FM_BOARD_BMC_SKU_ID3)<<3 |
         $(gpio_get FM_BOARD_BMC_SKU_ID2)<<2 |
         $(gpio_get FM_BOARD_BMC_SKU_ID1)<<1 |
-        $(gpio_get FM_BOARD_BMC_SKU_ID0))) > /tmp/cache_store/mb_sku
+        $(gpio_get FM_BOARD_BMC_SKU_ID0)))
 
 gpio_set BOARD_ID_MUX_SEL 1
 
@@ -468,6 +467,7 @@ gpio_export FM_BMC_PREQ_N GPIOAA4
 
 # FM_JTAG_TCK_MUX_SEL
 gpio_export FM_JTAG_TCK_MUX_SEL GPIOAA5
+gpio_set FM_JTAG_TCK_MUX_SEL 0
 
 # IRQ_SMI_ACTIVE_BMC_N
 gpio_export IRQ_SMI_ACTIVE_BMC_N GPIOAA6
@@ -481,7 +481,7 @@ gpio_export FM_BMC_BMCINIT GPIOAB0
 
 # PECI_MUX_SELECT
 gpio_export PECI_MUX_SELECT GPIOAB1
-gpio_set PECI_MUX_SELECT 1
+gpio_set PECI_MUX_SELECT 0
 
 # PWRGD_BMC_PS_PWROK
 gpio_export PWRGD_BMC_PS_PWROK GPIOAB3
@@ -504,3 +504,11 @@ gpio_export_ioexp 4-0077 FM_CPU0_SKTOCC_LVT3_PLD_N 6
 gpio_export_ioexp 4-0077 FM_CPU1_SKTOCC_LVT3_PLD_N 7
 gpio_export_ioexp 4-0077 HP_LVC3_OCP_V3_2_PRSNT2_N 8
 gpio_export_ioexp 4-0077 HP_LVC3_OCP_V3_1_PRSNT2_N 9
+
+# Mode Setting (2S: mode=1 4S: mode=0)
+mode=$(gpio_get FM_BMC_SKT_ID_2)
+if [ "$mode" == "1" ]; then
+    gpio_set LED_4S_2S_MODE_N 0
+else
+    gpio_set LED_4S_2S_MODE_N 1
+fi

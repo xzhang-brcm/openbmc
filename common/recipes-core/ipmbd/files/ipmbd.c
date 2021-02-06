@@ -752,15 +752,28 @@ struct ipmb_svc_cookie {
 static int
 conn_handler(client_t *cli) {
   struct ipmb_svc_cookie *svc = (struct ipmb_svc_cookie *)cli->svc_cookie;
-  unsigned char req_buf[MAX_IPMB_RES_LEN];
+  unsigned char req_buf[MAX_IPMB_REQ_LEN];
   unsigned char res_buf[MAX_IPMB_RES_LEN];
-  size_t req_len = MAX_IPMB_RES_LEN;
+  size_t req_len = MAX_IPMB_REQ_LEN;
   unsigned char res_len=0;
 
   SVC_VERBOSE("entering svc handler");
   if (ipc_recv_req(cli, req_buf, &req_len, TIMEOUT_IPMB)) {
     OBMC_ERROR(errno, "%s: ipc_recv_req() failed", IPMBD_SVC_THREAD);
     return -1;
+  }
+
+  if (req_len == IPMB_PING_LEN) { // get IANA then sends back
+    res_len = IPMB_PING_LEN;
+    res_buf[0] = req_buf[0];
+    res_buf[1] = req_buf[1];
+    res_buf[2] = req_buf[2];
+    if (ipc_send_resp(cli, res_buf, res_len) != 0) {
+      OBMC_ERROR(errno, "%s: ipc_send_resp() failed", IPMBD_SVC_THREAD);
+      return -1;
+    }
+    syslog(LOG_WARNING, "%s IPMB BUS_ID=%x ping scuess\n", __func__,ipmbd_config.bus_id);
+    return 0;
   }
 
   if(ipmbd_config.bic_update_enabled) {
@@ -771,7 +784,7 @@ conn_handler(client_t *cli) {
   }
 
   ipmb_handle(svc->i2c_fd, req_buf,
-              (unsigned short)req_len, res_buf, &res_len);
+              (unsigned int)req_len, res_buf, &res_len);
 
   if(ipc_send_resp(cli, res_buf, res_len) != 0) {
     OBMC_ERROR(errno, "%s: ipc_send_resp() failed", IPMBD_SVC_THREAD);

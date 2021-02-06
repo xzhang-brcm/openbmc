@@ -111,7 +111,25 @@ func TestRunCommand(t *testing.T) {
 	// save log output into buf for testing
 	var buf bytes.Buffer
 	log.SetOutput(&buf)
+	// set locale (LC_ALL=C) to prevent tests from failing on differing locales
+	const lcAllKey = "LC_ALL"
+	origLCALL, setLCALL := os.LookupEnv(lcAllKey)
+	err := os.Setenv(lcAllKey, "C")
+	if err != nil {
+		panic(err)
+	}
 	defer func() {
+		if setLCALL {
+			err = os.Setenv(lcAllKey, origLCALL)
+			if err != nil {
+				panic(err)
+			}
+		} else {
+			err = os.Unsetenv(lcAllKey)
+			if err != nil {
+				panic(err)
+			}
+		}
 		log.SetOutput(os.Stderr)
 	}()
 
@@ -197,7 +215,7 @@ func TestRunCommand(t *testing.T) {
 		},
 		{
 			name: "Check stream sequence: stderr -> stdout -> stderr",
-			// the sleeps are necessary as the scanners are concurrrent
+			// the sleeps are necessary as the scanners are concurrent
 			cmdArr:       []string{"bash", "-c", "echo seq1 >&2; sleep 0.1; echo seq2; sleep 0.1; echo seq3 >&2"},
 			timeout:      30 * time.Second,
 			wantExitCode: 0,
@@ -213,7 +231,7 @@ func TestRunCommand(t *testing.T) {
 		},
 		{
 			name: "Check stream sequence: stdout -> stderr -> stdout",
-			// the sleeps are necessary as the scanners are concurrrent
+			// the sleeps are necessary as the scanners are concurrent
 			cmdArr:       []string{"bash", "-c", "echo seq1; sleep 0.1; echo seq2 >&2; sleep 0.1; echo seq3"},
 			timeout:      30 * time.Second,
 			wantExitCode: 0,
@@ -299,12 +317,12 @@ func TestRunCommandWithRetries(t *testing.T) {
 	// save log output into buf for testing
 	var buf bytes.Buffer
 	log.SetOutput(&buf)
-	// mock and defer restore sleepFunc and RunCommand
-	sleepFuncOrig := sleepFunc
+	// mock and defer restore Sleep and RunCommand
+	sleepFuncOrig := Sleep
 	runCommandOrig := RunCommand
 	defer func() {
 		log.SetOutput(os.Stderr)
-		sleepFunc = sleepFuncOrig
+		Sleep = sleepFuncOrig
 		RunCommand = runCommandOrig
 	}()
 
@@ -405,7 +423,7 @@ func TestRunCommandWithRetries(t *testing.T) {
 				return 0, cmdErr, "", ""
 			}
 
-			sleepFunc = func(d time.Duration) {
+			Sleep = func(d time.Duration) {
 				gotSleepTimes = append(gotSleepTimes, d)
 			}
 
@@ -762,10 +780,17 @@ func TestCheckNoBaseNameExistsInProcCmdlinePaths(t *testing.T) {
 			readFileRet: map[string]interface{}{
 				"/proc/42/cmdline": ReadFileRetType{[]byte("fw-util\x00-foobar"), nil},
 			},
-			want: errors.Errorf("'fw-util' found in cmdline 'fw-util -foobar'"),
+			want: nil,
 		},
 		{
 			name: "base name exists (3)",
+			readFileRet: map[string]interface{}{
+				"/proc/42/cmdline": ReadFileRetType{[]byte("fw-util\x00bmc\x00--update"), nil},
+			},
+			want: errors.Errorf("'fw-util' found in cmdline 'fw-util bmc --update'"),
+ 		},
+		{
+			name: "base name exists (4)",
 			readFileRet: map[string]interface{}{
 				"/proc/42/cmdline": ReadFileRetType{[]byte(
 					"/opt/flashy/checks_and_remediations/common/00_dummy_step\x00-device\x00mtd:flash0",
@@ -853,6 +878,61 @@ func TestGetMTDMapFromSpecifier(t *testing.T) {
 			got, err := GetMTDMapFromSpecifier(tc.specifier)
 			tests.CompareTestErrors(tc.wantErr, err, t)
 			if !reflect.DeepEqual(tc.want, got) {
+				t.Errorf("want '%v' got '%v'", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestIsDataPartitionMounted(t *testing.T) {
+	readFileOrig := fileutils.ReadFile
+	defer func() {
+		fileutils.ReadFile = readFileOrig
+	}()
+
+	cases := []struct {
+		name              string
+		procMountContents string
+		procMountReadErr  error
+		want              bool
+		wantErr           error
+	}{
+		{
+			name:              "data partition exists",
+			procMountContents: tests.ExampleWedge100ProcMountsFile,
+			procMountReadErr:  nil,
+			want:              true,
+			wantErr:           nil,
+		},
+		{
+			name:              "data partition does not exist",
+			procMountContents: tests.ExampleWedge100ProcMountsFileUnmountedData,
+			procMountReadErr:  nil,
+			want:              false,
+			wantErr:           nil,
+		},
+		{
+			name:              "file read error",
+			procMountContents: "",
+			procMountReadErr:  errors.Errorf("file read error"),
+			want:              false,
+			wantErr:           errors.Errorf("Cannot read /proc/mounts: file read error"),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fileutils.ReadFile = func(filename string) ([]byte, error) {
+				if filename != "/proc/mounts" {
+					t.Errorf("filename: want '%v' got '%v'",
+						"/proc/mounts", filename)
+				}
+				return []byte(tc.procMountContents), tc.procMountReadErr
+			}
+
+			got, err := IsDataPartitionMounted()
+			tests.CompareTestErrors(tc.wantErr, err, t)
+			if tc.want != got {
 				t.Errorf("want '%v' got '%v'", tc.want, got)
 			}
 		})

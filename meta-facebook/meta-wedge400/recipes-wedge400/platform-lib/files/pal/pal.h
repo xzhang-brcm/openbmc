@@ -417,7 +417,6 @@ enum {
   SMB_SENSOR_VDDCK_0_TEMP,
   SMB_SENSOR_VDDCK_1_IN_VOLT,
   SMB_SENSOR_VDDCK_1_OUT_VOLT,
-  SMB_SENSOR_VDDCK_1_IN_CURR,
   SMB_SENSOR_VDDCK_1_OUT_CURR,
   SMB_SENSOR_VDDCK_1_OUT_POWER,
   SMB_SENSOR_VDDCK_1_TEMP,
@@ -439,6 +438,8 @@ enum {
   /* Threshold Sensors on PEM1 */
   PEM1_SENSOR_IN_VOLT = 0x01,
   PEM1_SENSOR_OUT_VOLT,
+  PEM1_SENSOR_FET_BAD,
+  PEM1_SENSOR_FET_SHORT,
   PEM1_SENSOR_CURR,
   PEM1_SENSOR_POWER,
   PEM1_SENSOR_FAN1_TACH,
@@ -486,6 +487,8 @@ enum {
     /* Threshold Sensors on PEM2 */
   PEM2_SENSOR_IN_VOLT,
   PEM2_SENSOR_OUT_VOLT,
+  PEM2_SENSOR_FET_BAD,
+  PEM2_SENSOR_FET_SHORT,
   PEM2_SENSOR_CURR,
   PEM2_SENSOR_POWER,
   PEM2_SENSOR_FAN1_TACH,
@@ -617,8 +620,6 @@ int pal_set_last_pwr_state(uint8_t fru, char *state);
 int pal_get_last_pwr_state(uint8_t fru, char *state);
 int pal_get_dev_guid(uint8_t slot, char *guid);
 int pal_set_dev_guid(uint8_t slot, char *str);
-int pal_get_sys_guid(uint8_t slot, char *guid);
-int pal_set_sys_guid(uint8_t slot, char *str);
 int pal_set_com_pwr_btn_n(char *status);
 int pal_set_server_power(uint8_t slot_id, uint8_t cmd);
 int pal_get_server_power(uint8_t slot_id, uint8_t *status);
@@ -639,9 +640,6 @@ int pal_get_sensor_threshold(uint8_t fru, uint8_t sensor_num, uint8_t thresh, vo
 void pal_sensor_assert_handle(uint8_t fru, uint8_t snr_num, float val, uint8_t thresh);
 void pal_sensor_deassert_handle(uint8_t fru, uint8_t snr_num, float val, uint8_t thresh);
 int pal_sensor_threshold_flag(uint8_t fru, uint8_t snr_num, uint16_t *flag);
-int pal_detect_i2c_device(uint8_t bus_num, uint8_t addr);
-int pal_add_i2c_device(uint8_t bus, uint8_t addr, char *device_name);
-int pal_del_i2c_device(uint8_t bus, uint8_t addr);
 void pal_get_chassis_status(uint8_t slot, uint8_t *req_data, uint8_t *res_data, uint8_t *res_len);
 uint8_t pal_set_power_restore_policy(uint8_t slot, uint8_t *pwr_policy, uint8_t *res_data);
 int pal_sel_handler(uint8_t fru, uint8_t snr_num, uint8_t *event_data);

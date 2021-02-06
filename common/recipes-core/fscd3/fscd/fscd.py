@@ -27,6 +27,7 @@ import time
 import traceback
 
 import fsc_expr
+import fsc_board
 from fsc_bmcmachine import BMCMachine
 from fsc_board import board_callout, board_fan_actions, board_host_actions
 from fsc_profile import Sensor, profile_constructor
@@ -102,6 +103,12 @@ class Fscd(object):
         self.fan_limit_upper_pwm = None
         self.fan_limit_lower_pwm = None
         self.sensor_filter_all = False
+        self.pwm_sensor_boost_value = None
+        self.output_max_boost_pwm = False
+        if "get_fan_mode" in dir(fsc_board):
+            self.get_fan_mode = True
+        else:
+            self.get_fan_mode = False
 
     # TODO: Add checks for invalid config file path
     def get_fsc_config(self, fsc_config):
@@ -130,9 +137,13 @@ class Fscd(object):
         if "fan_dead_boost" in self.fsc_config:
             self.fan_dead_boost = self.fsc_config["fan_dead_boost"]
             self.all_fan_fail_counter = 0
+        if "output_max_boost_pwm" in self.fsc_config:
+            self.output_max_boost_pwm = self.fsc_config["output_max_boost_pwm"]
         if "boost" in self.fsc_config and "sensor_fail" in self.fsc_config["boost"]:
             self.sensor_fail = self.fsc_config["boost"]["sensor_fail"]
             if self.sensor_fail:
+                if "pwm_sensor_boost_value" in self.fsc_config:
+                    self.pwm_sensor_boost_value = self.fsc_config["pwm_sensor_boost_value"]
                 if "fail_sensor_type" in self.fsc_config:
                     self.fail_sensor_type = self.fsc_config["fail_sensor_type"]
                 if "ssd_progressive_algorithm" in self.fsc_config:
@@ -256,6 +267,8 @@ class Fscd(object):
                             valid_read_limit = valid_table["limit"]
                             valid_read_action = valid_table["action"]
                             valid_read_th = valid_table["threshold"]
+                            # Use dict.get(key, None) avoid exception when no configuration
+                            valid_fault_tolerant = valid_table.get("fault_tolerant", None)
                             if isinstance(
                                 self.sensors[tuple.name].source, FscSensorSourceUtil
                             ):
@@ -276,6 +289,12 @@ class Fscd(object):
                                             + str(valid_read_limit)
                                             + ") reached"
                                         )
+                                        if valid_fault_tolerant:
+                                            Logger.info(
+                                                "%s without action since fault_tolerant is enabled"
+                                                % (reason)
+                                            )
+                                            continue
                                         self.fsc_host_action(
                                             action=valid_read_action, cause=reason
                                         )
@@ -572,6 +591,11 @@ class Fscd(object):
                     sensors=sensors_tuples, ctx=ctx, ignore_mode=ignore_fan_mode
                 )
                 mode = zone.get_set_fan_mode(mode, action="read")
+                # if we set pwm_sensor_boost_value option, assign it to pwmval
+                if self.pwm_sensor_boost_value != None and \
+                    int(mode) == fan_mode["boost_mode"]:
+                    if pwmval == self.boost:
+                        pwmval = self.pwm_sensor_boost_value
             else:
                 pwmval = self.boost
                 mode = fan_mode["boost_mode"]
@@ -590,15 +614,13 @@ class Fscd(object):
                             if dead <= fan_count:
                                 pwmval = clamp(pwmval + (dead * rate), 0, 100)
                                 mode = fan_mode["normal_mode"]
-                                if os.path.isfile(boost_record_path):
-                                    os.remove(boost_record_path)
                                 break
                         else:
                             pwmval = self.boost
                             mode = fan_mode["boost_mode"]
-                            if not os.path.isfile(boost_record_path):
-                                fan_fail_boost_record = open(boost_record_path, "w")
-                                fan_fail_boost_record.close()
+                        if not os.path.isfile(boost_record_path):
+                            fan_fail_boost_record = open(boost_record_path, "w")
+                            fan_fail_boost_record.close()
                     else:
                         if os.path.isfile(boost_record_path):
                             os.remove(boost_record_path)
@@ -609,8 +631,30 @@ class Fscd(object):
                             "Failed fans: %s"
                             % (", ".join([str(i.label) for i in dead_fans]))
                         )
-                        pwmval = self.boost
-                        mode = fan_mode["boost_mode"]
+                        if self.get_fan_mode:
+                            # user define
+                            set_fan_mode, set_fan_pwm = fsc_board.get_fan_mode(
+                                "one_fan_failure"
+                            )
+                            # choose the higher PWM
+                            pwmval = max(set_fan_pwm, pwmval)
+                            if int(pwmval) == int(set_fan_pwm):
+                                mode = set_fan_mode
+                            else:
+                                pwmval = zone.run(
+                                    sensors=sensors_tuples,
+                                    ctx=ctx, ignore_mode=False
+                                )
+                                mode = zone.get_set_fan_mode(
+                                    mode, action="read"
+                                )
+                        else:
+                            # choose the higher PWM
+                            if self.output_max_boost_pwm:
+                                pwmval = self.boost if pwmval < self.boost else pwmval
+                            else:
+                                pwmval = self.boost
+                            mode = fan_mode["boost_mode"]
                         if not os.path.isfile(boost_record_path):
                             fan_fail_boost_record = open(boost_record_path, "w")
                             fan_fail_boost_record.close()

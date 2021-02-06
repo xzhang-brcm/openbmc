@@ -194,6 +194,15 @@ is_pldm_state_sensor(uint8_t snr_num, uint8_t fru)
   return 0;
 }
 
+static int
+is_supported_sensor(uint8_t snr_num, uint8_t fru)
+{
+  if (pal_is_sensor_valid(fru, snr_num)) {
+    return 1;
+  }
+  return 0;
+}
+
 const char *
 numeric_state_to_name(unsigned int state, const char *name_str[], size_t n, const char* error_str)
 {
@@ -486,6 +495,8 @@ get_sensor_reading(void *sensor_data) {
           }
         } else if (filter) {
           printf("%-28s (0x%X) : NA | (na)\n", filter_sensor_name, sensor_info->sensor_list[i]);
+        } else if (is_supported_sensor(snr_num, sensor_info->fru)) {
+          printf("%-28s (0x%X) : 0/NA | (na)\n", thresh.name, sensor_info->sensor_list[i]);
         } else {
           printf("%-28s (0x%X) : NA | (na)\n", thresh.name, sensor_info->sensor_list[i]);
         }
@@ -692,23 +703,27 @@ print_sensor(uint8_t fru, int sensor_num, bool history, bool threshold, bool for
     }
     ret = pal_is_fru_prsnt(fru, &status);
     if (ret < 0) {
-      printf("pal_is_fru_prsnt failed for fru: %s\n", fruname);
+      if (json == 0)
+        printf("pal_is_fru_prsnt failed for fru: %s\n", fruname);
       return ret;
     }
     if (status == 0) {
-      printf("%s is not present!\n\n", fruname);
+      if (json == 0)
+        printf("%s is not present!\n\n", fruname);
       return -1;
     }
 
     ret = pal_is_fru_ready(fru, &status);
     if ((ret < 0) || (status == 0)) {
-      printf("%s is unavailable!\n\n", fruname);
+      if (json == 0)
+        printf("%s is unavailable!\n\n", fruname);
       return ret;
     }
 
     ret = pal_get_fru_sensor_list(fru, &sensor_list, &sensor_cnt);
     if (ret < 0) {
-      printf("%s get sensor list failed!\n", fruname);
+      if (json == 0)
+        printf("%s get sensor list failed!\n", fruname);
       return ret;
     }
   }

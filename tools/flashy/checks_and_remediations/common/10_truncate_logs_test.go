@@ -21,9 +21,11 @@ package common
 
 import (
 	"testing"
+	"time"
 
 	"github.com/facebook/openbmc/tools/flashy/lib/fileutils"
 	"github.com/facebook/openbmc/tools/flashy/lib/step"
+	"github.com/facebook/openbmc/tools/flashy/lib/utils"
 	"github.com/pkg/errors"
 )
 
@@ -37,11 +39,13 @@ func TestTruncateLogs(t *testing.T) {
 	truncateFileOrig := fileutils.TruncateFile
 	removeFileOrig := fileutils.RemoveFile
 	globAllOrig := fileutils.GlobAll
+	runCommandOrig := utils.RunCommand
 
 	defer func() {
 		fileutils.TruncateFile = truncateFileOrig
 		fileutils.RemoveFile = removeFileOrig
 		fileutils.GlobAll = globAllOrig
+		utils.RunCommand = runCommandOrig
 	}()
 
 	cases := []struct {
@@ -69,38 +73,6 @@ func TestTruncateLogs(t *testing.T) {
 			removeFileErr:   nil,
 			truncateFileErr: nil,
 			want:            nil,
-		},
-		{
-			name: "Remove file error",
-			resolvedFilePatterns: []GlobAllReturnType{
-				GlobAllReturnType{
-					[]string{"/tmp/test"},
-					nil,
-				},
-				GlobAllReturnType{
-					[]string{"/tmp/test"},
-					nil,
-				},
-			},
-			removeFileErr:   errors.Errorf("RemoveFile Error"),
-			truncateFileErr: nil,
-			want:            step.ExitSafeToReboot{errors.Errorf("Unable to remove log file '/tmp/test': RemoveFile Error")},
-		},
-		{
-			name: "Truncate file error",
-			resolvedFilePatterns: []GlobAllReturnType{
-				GlobAllReturnType{
-					[]string{"/tmp/test"},
-					nil,
-				},
-				GlobAllReturnType{
-					[]string{"/tmp/test"},
-					nil,
-				},
-			},
-			removeFileErr:   nil,
-			truncateFileErr: errors.Errorf("TruncateFile Error"),
-			want:            step.ExitSafeToReboot{errors.Errorf("Unable to truncate log file '/tmp/test': TruncateFile Error")},
 		},
 		{
 			name: "Resolve file patterns error (1)",
@@ -139,6 +111,7 @@ func TestTruncateLogs(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			resolveFilePatternsCalled := 0
+			journalctlRan := false
 			fileutils.GlobAll = func(patterns []string) ([]string, error) {
 				ret := tc.resolvedFilePatterns[resolveFilePatternsCalled]
 				resolveFilePatternsCalled++
@@ -150,7 +123,14 @@ func TestTruncateLogs(t *testing.T) {
 			fileutils.RemoveFile = func(filename string) error {
 				return tc.removeFileErr
 			}
+			utils.RunCommand = func(cmdArr []string, timeout time.Duration) (int, error, string, string) {
+				journalctlRan = (cmdArr[0] == "journalctl")
+				return 0, nil, "", ""
+			}
 			got := truncateLogs(step.StepParams{})
+			if !journalctlRan {
+				t.Errorf("journalctl not executed")
+			}
 			step.CompareTestExitErrors(tc.want, got, t)
 		})
 	}

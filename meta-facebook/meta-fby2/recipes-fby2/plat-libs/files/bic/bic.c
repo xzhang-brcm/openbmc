@@ -36,14 +36,17 @@
 #include <openbmc/obmc-i2c.h>
 #include <openbmc/misc-utils.h>
 #include <openbmc/libgpio.h>
+#include <openssl/sha.h>
 
 #define FRUID_READ_COUNT_MAX 0x20
 #define FRUID_WRITE_COUNT_MAX 0x20
 #define FRUID_SIZE 256
 #define IPMB_READ_COUNT_MAX 224
 #define IPMB_WRITE_COUNT_MAX 224
+#define IPMB_BIOS_WRITE_COUNT_MAX 2048 // 2065 - 17
 #define BIOS_ERASE_PKT_SIZE (64*1024)
 #define BIOS_VERIFY_PKT_SIZE (32*1024)
+#define BIOS_UPDATE_PKT_SIZE (64*1024)
 #define SDR_READ_COUNT_MAX 0x1A
 #define SIZE_SYS_GUID 16
 #define SIZE_IANA_ID 3
@@ -52,10 +55,12 @@
 #define BIOS_VER_STR "F09_"
 #define Y2_BIOS_VER_STR "YMV2"
 #define GPV2_BIOS_VER_STR "F09B"
+#define YV2_MERGE_BIOS_VER_STR "F09M"
 #define ND_BIOS_VER_STR "F09C"
 
 #define BIC_SIGN_SIZE 32
 #define BIC_UPDATE_RETRIES 12
+#define PING_IPMB_RETRIES 5
 #define BIC_UPDATE_TIMEOUT 500
 #define GPV2_BIC_PLAT_STR "F09B"
 #define ND_BIC_PLAT_STR "ND"
@@ -90,6 +95,7 @@
 #define BRCM_UPDATE_STATUS 128
 #define BRCM_WRITE_CMD 130
 #define BRCM_READ_CMD 131
+#define BRCM_UPDATE_RTRIES 3
 
 #define VSI_UPDATE_STATUS 133
 #define VSI_FW_TYPE 135
@@ -102,6 +108,17 @@
 #define PCIE_SW_MAX_RETRY 50
 
 #define PCIE_LINK_CHECK_MAX_RETRY 3
+
+#define DEVICE_MUX_ADDR 0xE2
+#define MAX_GPV2_DRIVE_NUM 12
+
+#define log_system(cmd)                                                     \
+do {                                                                        \
+  int sysret = system(cmd);                                                 \
+  if (sysret)                                                               \
+    syslog(LOG_WARNING, "%s: system command failed, cmd: \"%s\",  ret: %d", \
+            __func__, cmd, sysret);                                         \
+} while(0)
 
 #pragma pack(push, 1)
 typedef struct _sdr_rec_hdr_t {
@@ -353,7 +370,7 @@ bic_ipmb_limit_rlen_wrapper(uint8_t slot_id, uint8_t netfn, uint8_t cmd,
   ipmb_req_t *req;
   ipmb_res_t *res;
   uint8_t rbuf[MAX_IPMB_RES_LEN] = {0};
-  uint8_t tbuf[MAX_IPMB_RES_LEN] = {0};
+  uint8_t tbuf[MAX_IPMB_REQ_LEN] = {0};
   uint16_t tlen = 0;
   uint8_t rlen = 0;
   int i = 0;
@@ -433,6 +450,9 @@ bic_ipmb_limit_rlen_wrapper(uint8_t slot_id, uint8_t netfn, uint8_t cmd,
     if (res->cc == CC_BIC_RETRY) { // Completion Code for BIC retry
       syslog(LOG_ERR, "bic_ipmb_wrapper: Completion Code: 0x%X for BIC retry\n", res->cc);
       return BIC_RETRY_ACTION;
+    } else if (res->cc == CC_BIC_INVALID_CMD) { // Completion Code for BIC do not support the command yet
+      syslog(LOG_ERR, "bic_ipmb_wrapper: Completion Code: 0x%X for BIC invalid command\n", res->cc);
+      return BIC_INVALID_CMD;
     }
     return -1;
   }
@@ -460,6 +480,52 @@ bic_ipmb_limit_rlen_wrapper(uint8_t slot_id, uint8_t netfn, uint8_t cmd,
 
   return 0;
 }
+
+int
+bic_ipmb_wrapper_with_dev_mux_selection(uint8_t slot_id, int dev_id, uint8_t netfn, uint8_t cmd,
+                  uint8_t *txbuf, uint16_t txlen,
+                  uint8_t *rxbuf, uint8_t *rxlen) {
+
+  int ret = 0, s_ret = 0, bus = 0;
+  uint8_t wbuf[256] = {0x00};
+  uint8_t rbuf[256] = {0x00};
+
+  if (dev_id < 0 || dev_id >= MAX_GPV2_DRIVE_NUM) {
+    syslog(LOG_ERR, "%s: Invalid dev_id: %d\n", __FUNCTION__, dev_id);
+    return -1;
+  }
+
+  s_ret = bic_disable_sensor_monitor(slot_id, BIC_SENSOR_MONITOR_DISABLE);
+  if (s_ret < 0) {
+    syslog(LOG_ERR, "%s: Fail to stop sensor monitor, error: %d\n", __FUNCTION__, s_ret);
+    return s_ret;
+  }
+  msleep(100);
+
+  // select MUX
+  wbuf[0] = 1 << (dev_id % 2);
+  bus = *txbuf;
+  ret = bic_master_write_read(slot_id, bus, DEVICE_MUX_ADDR, wbuf, 1, rbuf, 0);
+  if (ret < 0) {
+    syslog(LOG_ERR, "%s(): bic_master_write_read failed, error: %d\n", __FUNCTION__, ret);
+    goto Err;
+  }
+
+  ret = bic_ipmb_wrapper(slot_id, netfn, cmd, txbuf, txlen, rxbuf, rxlen);
+  if (ret < 0) {
+    syslog(LOG_WARNING, "%s: Fail to send IPMB command to slot%d, error: %d", __FUNCTION__, slot_id, ret);
+  }
+
+Err:
+  s_ret = bic_disable_sensor_monitor(slot_id, BIC_SENSOR_MONITOR_ENABLE);
+  if (s_ret < 0) {
+    syslog(LOG_ERR, "%s: Fail to start sensor monitor, error: %d\n", __FUNCTION__, s_ret);
+  }
+  msleep(100);
+
+  return ret;
+}
+
 
 // Get Self-Test result
 int
@@ -550,6 +616,7 @@ bic_get_gpio(uint8_t slot_id, bic_gpio_t *gpio) {
   uint8_t tbuf[4] = {0x15, 0xA0, 0x00}; // IANA ID
   uint8_t rbuf[12] = {0x00};
   uint8_t rlen = 0;
+  uint8_t server_type = SERVER_TYPE_NONE;
   int ret;
 
   // Ensure the reserved bits are set to 0.
@@ -565,6 +632,13 @@ bic_get_gpio(uint8_t slot_id, bic_gpio_t *gpio) {
 
   // Ignore first 3 bytes of IANA ID
   memcpy((uint8_t*) gpio, &rbuf[3], rlen);
+
+  if (bic_get_server_type(slot_id, &server_type) < 0) {
+    return -1;
+  } else if (server_type == SERVER_TYPE_ND) {
+    // invert gpio pin 21 (ND_FM_BIOS_POST_COMPT_N) for northdome platform
+    gpio->gpio = gpio->gpio ^ (1 << ND_FM_BIOS_POST_COMPT_N);
+  }
 
   return ret;
 }
@@ -880,6 +954,45 @@ bic_send:
   return ret;
 }
 
+// Check IPMB start or not
+static int
+_ping_ipmb(uint8_t slot_id) {
+  uint8_t rbuf[3] = {0};
+  uint8_t tbuf[3] = {0x15, 0xA0, 0x00}; // IANA
+  uint16_t tlen = 2;
+  uint8_t rlen = 2;
+  uint8_t bus_id;
+  int ret = 0;
+  int retry = 0;
+
+  if (!is_bic_ready(slot_id)) {
+    return -1;
+  }
+
+  ret = get_ipmb_bus_id(slot_id);
+  if (ret < 0) {
+    return ret;
+  }
+
+  bus_id = (uint8_t) ret;
+
+  while(retry < 3) {
+    // Invoke IPMB library handler
+    ret = lib_ipmb_handle(bus_id, tbuf, tlen, rbuf, &rlen);
+    if (ret != 0) {
+      syslog(LOG_ERR, "%s: Failed to ping.\n", __func__);
+    }
+
+    if (rlen == IPMB_PING_LEN && !memcpy(tbuf,rbuf,IPMB_PING_LEN) ) {
+      break;
+    }
+
+    retry++;
+    msleep(20);
+  }
+  return ret;
+}
+
 // Read Firwmare Versions of various components
 static int
 _enable_bic_update(uint8_t slot_id) {
@@ -899,9 +1012,9 @@ _enable_bic_update(uint8_t slot_id) {
 // Update firmware for various components
 static int
 _update_fw(uint8_t slot_id, uint8_t target, uint32_t offset, uint16_t len, uint8_t *buf) {
-  uint8_t tbuf[256] = {0x15, 0xA0, 0x00}; // IANA ID
+  uint8_t tbuf[MAX_IPMB_REQ_LEN] = {0x15, 0xA0, 0x00}; // IANA ID
   uint8_t rbuf[16] = {0x00};
-  uint8_t tlen = 0;
+  uint16_t tlen = 0;
   uint8_t rlen = 0;
   int ret;
   int retries = 3;
@@ -1334,7 +1447,7 @@ _update_bic_main(uint8_t slot_id, char *path, uint8_t force) {
 
   // Kill ipmb daemon for this slot
   sprintf(cmd, "sv stop ipmbd_%d", get_ipmb_bus_id(slot_id));
-  system(cmd);
+  log_system(cmd);
   printf("stop ipmbd for slot %x..\n", slot_id);
 
   // The I2C high speed clock (1M) could cause to read BIC data abnormally.
@@ -1342,16 +1455,16 @@ _update_bic_main(uint8_t slot_id, char *path, uint8_t force) {
   switch(slot_id)
   {
      case FRU_SLOT1:
-       system("devmem 0x1e78a084 w 0xFFF77304");
+       log_system("devmem 0x1e78a084 w 0xFFF77304");
        break;
      case FRU_SLOT2:
-       system("devmem 0x1e78a104 w 0xFFF77304");
+       log_system("devmem 0x1e78a104 w 0xFFF77304");
        break;
      case FRU_SLOT3:
-       system("devmem 0x1e78a184 w 0xFFF77304");
+       log_system("devmem 0x1e78a184 w 0xFFF77304");
        break;
      case FRU_SLOT4:
-       system("devmem 0x1e78a304 w 0xFFF77304");
+       log_system("devmem 0x1e78a304 w 0xFFF77304");
        break;
      default:
        syslog(LOG_CRIT, "bic_update_fw: incorrect slot_id %d\n", slot_id);
@@ -1371,19 +1484,35 @@ _update_bic_main(uint8_t slot_id, char *path, uint8_t force) {
     // Restart ipmb daemon with "-u|--enable-bic-update" for bic update
     memset(cmd, 0, sizeof(cmd));
     sprintf(cmd, "/usr/local/bin/ipmbd -u %d %d > /dev/null 2>&1 &", get_ipmb_bus_id(slot_id), slot_id);
-    system(cmd);
+    log_system(cmd);
     printf("start ipmbd -u for this slot %x..\n",slot_id);
+    syslog(LOG_WARNING, "start ipmbd -u for this slot %x..\n",slot_id);
 
-    sleep(2);
+    for (i = 0; i < PING_IPMB_RETRIES; i++) {
+      if (!_ping_ipmb(slot_id)) {
+        printf("ipmbd ready for update after %d tries\n", i);
+        break;
+      }
+      sleep(1);
+    }
 
-    // Enable Bridge-IC update
-    _enable_bic_update(slot_id);
+    if (i != PING_IPMB_RETRIES) { // ipmb ready
+      // Enable Bridge-IC update
+      syslog(LOG_WARNING, "_enable_bic_update slot %x..\n",slot_id);
+      _enable_bic_update(slot_id);
+    }
 
     // Kill ipmb daemon "--enable-bic-update" for this slot
     memset(cmd, 0, sizeof(cmd));
     sprintf(cmd, "ps -w | grep -v 'grep' | grep 'ipmbd -u %d' |awk '{print $1}'| xargs kill", get_ipmb_bus_id(slot_id));
-    system(cmd);
+    log_system(cmd);
     printf("stop ipmbd for slot %x..\n", slot_id);
+
+    if (i == BIC_UPDATE_RETRIES) { // ipmb not ready
+      printf("ipmbd is NOT ready for update\n");
+      syslog(LOG_CRIT, "bic_update_fw: ipmbd is NOT ready for update\n");
+      goto error_exit;
+    }
   }
 
   // Wait for SMB_BMC_3v3SB_ALRT_N
@@ -1607,16 +1736,16 @@ error_exit:
   switch(slot_id)
   {
      case FRU_SLOT1:
-       system("devmem 0x1e78a084 w 0xFFF5E700");
+       log_system("devmem 0x1e78a084 w 0xFFF5E700");
        break;
      case FRU_SLOT2:
-       system("devmem 0x1e78a104 w 0xFFF5E700");
+       log_system("devmem 0x1e78a104 w 0xFFF5E700");
        break;
      case FRU_SLOT3:
-       system("devmem 0x1e78a184 w 0xFFF5E700");
+       log_system("devmem 0x1e78a184 w 0xFFF5E700");
        break;
      case FRU_SLOT4:
-       system("devmem 0x1e78a304 w 0xFFF5E700");
+       log_system("devmem 0x1e78a304 w 0xFFF5E700");
        break;
      default:
        syslog(LOG_ERR, "bic_update_fw: incorrect slot_id %d\n", slot_id);
@@ -1627,7 +1756,7 @@ error_exit:
   sleep(1);
   memset(cmd, 0, sizeof(cmd));
   sprintf(cmd, "sv start ipmbd_%d", get_ipmb_bus_id(slot_id));
-  system(cmd);
+  log_system(cmd);
 
 error_exit2:
   syslog(LOG_CRIT, "bic_update_fw: updating bic firmware is exiting on slot %d\n", slot_id);
@@ -1644,7 +1773,7 @@ error_exit2:
   if (done == 1) {    //update successfully
     memset(cmd, 0, sizeof(cmd));
     snprintf(cmd, MAX_CMD_LEN, "(/usr/local/bin/bic-cached %d; echo 1 >/tmp/cache_store/slot%d_sdr_thresh_update) &", slot_id, slot_id);   //retrieve SDR data after BIC FW update
-    system(cmd);
+    log_system(cmd);
   }
 
   return ret;
@@ -1848,7 +1977,11 @@ check_bios_image(uint8_t slot_id, int fd, long size) {
           memcmp(
               buf + offs + sizeof(ver_sig),
               GPV2_BIOS_VER_STR,
-              strlen(GPV2_BIOS_VER_STR))) {
+              strlen(GPV2_BIOS_VER_STR))&&
+          memcmp(
+              buf + offs + sizeof(ver_sig),
+              YV2_MERGE_BIOS_VER_STR,
+              strlen(YV2_MERGE_BIOS_VER_STR))) {
         offs = end;
       }
       break;
@@ -2037,6 +2170,7 @@ bic_update_dev_firmware(uint8_t slot_id, uint8_t dev_id, uint8_t comp, char *pat
   volatile uint16_t count, read_count;
   uint8_t buf[256] = {0};
   int fd;
+  int retries = 0;
   int rp_fw_type =  UNKOWN_FW;
 
   printf("updating fw on slot %d device %d:\n", slot_id,dev_id);
@@ -2112,21 +2246,28 @@ bic_update_dev_firmware(uint8_t slot_id, uint8_t dev_id, uint8_t comp, char *pat
       syslog(LOG_DEBUG,"%s(): set download init offset=%d", __func__,wbuf[0]);
     }
 
-    sleep(2);
-    wbuf[0] = BRCM_UPDATE_STATUS;  // offset 128 reday bit == 1?
-    rlen = 1;
-    ret = bic_master_write_read(slot_id, bus, 0xd4, wbuf, 1, rbuf, rlen);
-    if (ret != 0) {
-      syslog(LOG_DEBUG,"%s(): reday bit == 1? offset=%d read length=%d failed", __func__,wbuf[0],rlen);
-      goto error_exit;
+    for (retries = 0; retries < BRCM_UPDATE_RTRIES; retries++) {
+      sleep(2);
+      wbuf[0] = BRCM_UPDATE_STATUS;  // offset 128 reday bit == 1?
+      rlen = 1;
+      ret = bic_master_write_read(slot_id, bus, 0xd4, wbuf, 1, rbuf, rlen);
+      if (ret != 0) {
+        syslog(LOG_DEBUG,"%s(): reday bit == 1? offset=%d read length=%d failed", __func__,wbuf[0],rlen);
+        goto error_exit;
+      }
+
+      if (!(rbuf[0] & 0x40)) {
+        syslog(LOG_DEBUG,"%s(): reday bit == 0 reties = %d", __func__, retries);
+        ret = -1;
+      } else {
+        syslog(LOG_DEBUG,"%s(): reday bit == 1 offset=%d rbuf[0]=%d", __func__,wbuf[0],rbuf[0]);
+        break;
+      }
     }
 
-    if (!(rbuf[0] & 0x40)) {
-      syslog(LOG_DEBUG,"%s(): reday bit == 0", __func__);
-      ret = -1;
+    if (retries == BRCM_UPDATE_RTRIES) {
+      syslog(LOG_DEBUG,"%s(): reday bit == 0 reties failed", __func__);
       goto error_exit;
-    } else {
-      syslog(LOG_DEBUG,"%s(): reday bit == 1 offset=%d rbuf[0]=%d", __func__,wbuf[0],rbuf[0]);
     }
 
     wbuf[0] = BRCM_WRITE_CMD;  // offset 130
@@ -2331,15 +2472,93 @@ error_exit:
 }
 
 int
+bic_get_fw_sha256sum(uint8_t slot_id, uint8_t target, uint32_t offset, uint32_t len, uint8_t *ver) {
+  uint8_t tbuf[12] = {0x15, 0xa0, 0x00}; // IANA ID
+  uint8_t rbuf[256] = {0x00};
+  uint8_t rlen = 0;
+  int ret;
+  int retries = 3;
+
+  // Fill the component for which firmware is requested
+  tbuf[3] = target;
+
+  // Fill the offset
+  tbuf[4] = (offset) & 0xFF;
+  tbuf[5] = (offset >> 8) & 0xFF;
+  tbuf[6] = (offset >> 16) & 0xFF;
+  tbuf[7] = (offset >> 24) & 0xFF;
+
+  // Fill the length
+  tbuf[8] = (len) & 0xFF;
+  tbuf[9] = (len >> 8) & 0xFF;
+  tbuf[10] = (len >> 16) & 0xFF;
+  tbuf[11] = (len >> 24) & 0xFF;
+
+bic_send:
+  ret = bic_ipmb_wrapper(slot_id, NETFN_OEM_1S_REQ, CMD_OEM_1S_GET_SHA256, tbuf, 12, rbuf, &rlen);
+  if (ret == BIC_INVALID_CMD) { // Once the command is not supported from BIC, do not retry the command
+    syslog(LOG_ERR, "bic_get_fw_sha256sum: slot: %d, BIC not support checking sha256 sum\n", slot_id);
+  } else if ((ret || (rlen != 32+SIZE_IANA_ID)) && (retries--)) {  // sha256 is 32 bytes
+    sleep(1);
+    syslog(LOG_ERR, "bic_get_fw_sha256sum: slot: %d, target %d, offset: %d, ret: %d, rlen: %d\n", slot_id, target, offset, ret, rlen);
+    goto bic_send;
+  }
+
+  if (ret != 0) {
+    // just return if invalid cmd or no response
+    goto out;
+  }
+
+  //Ignore IANA ID
+  memcpy(ver, &rbuf[SIZE_IANA_ID], rlen-SIZE_IANA_ID);
+out:
+  return ret;
+}
+
+int
+send_large_packet_image(uint8_t slot_id, uint8_t target, uint32_t image_offset, uint32_t len, uint8_t *buf) {
+  uint8_t last_packet = 0;
+  size_t count = 0;
+  uint32_t offset = 0;
+  int i = 0;
+
+  while (1) {
+
+    if ( (offset + IPMB_BIOS_WRITE_COUNT_MAX) >= len ) {
+      count = len - offset;
+      last_packet = 1;
+    } else {
+      count = IPMB_BIOS_WRITE_COUNT_MAX;
+    }
+
+    if( _update_fw(slot_id, target, (image_offset+offset) , count, &buf[i*IPMB_BIOS_WRITE_COUNT_MAX])) {
+      printf("update fail: offset = 0x%02X count = 0x%02X\n", (image_offset+offset), count);
+      syslog(LOG_ERR,"send_large_packet_image fail: slot%d offset = 0x%02X count = 0x%02X\n", slot_id , (image_offset+offset), count);
+      return -1;
+    }
+
+    offset += count;
+    i++;
+
+    if (last_packet == 1) {
+      break;
+    }
+  }
+  return 0;
+}
+
+
+int
 bic_update_firmware(uint8_t slot_id, uint8_t comp, char *path, uint8_t force) {
   int ret = -1, rc;
   uint32_t offset;
-  volatile uint16_t count, read_count;
-  uint8_t buf[256] = {0};
+  volatile uint32_t count, read_count;
+  uint8_t buf[BIOS_UPDATE_PKT_SIZE] ={0};
   uint8_t target;
   uint8_t slot_num = 0, dev_id = 0;
   int fd;
   int i;
+  bool bic_support_sha256_cmd = false;
 
   if (comp == UPDATE_SPH) {
     slot_num = (slot_id >> 4);
@@ -2358,6 +2577,8 @@ bic_update_firmware(uint8_t slot_id, uint8_t comp, char *path, uint8_t force) {
 
   uint32_t dsize, last_offset, block_offset;
   struct stat st;
+  uint8_t sha256sum[SHA256_DIGEST_LENGTH];
+  uint8_t bic_sha256sum[SHA256_DIGEST_LENGTH];
   // Open the file exclusively for read
   fd = open(path, O_RDONLY, 0666);
   if (fd < 0) {
@@ -2373,6 +2594,20 @@ bic_update_firmware(uint8_t slot_id, uint8_t comp, char *path, uint8_t force) {
     if (!force && check_bios_image(slot_id, fd, st.st_size)) {
       printf("invalid BIOS file!\n");
       goto error_exit;
+    }
+    rc = bic_get_fw_sha256sum(slot_id, UPDATE_BIOS, 0, BIOS_UPDATE_PKT_SIZE, bic_sha256sum);
+    if (rc == 0) {
+      printf("support fast BIOS update\n");
+      syslog(LOG_WARNING, "slot%d support fast BIOS update", slot_id);
+      bic_support_sha256_cmd = true;
+    } else if (rc == BIC_INVALID_CMD) {
+      printf("not support fast BIOS update\n");
+      syslog(LOG_WARNING, "slot%d not support fast BIOS update", slot_id);
+      bic_support_sha256_cmd = false;
+    } else {
+      printf("select default BIOS update\n");
+      syslog(LOG_WARNING, "slot%d select default BIOS update", slot_id);
+      bic_support_sha256_cmd = false;
     }
     syslog(LOG_CRIT, "Update BIOS: update bios firmware on slot %d\n", slot_id);
     dsize = st.st_size/100;
@@ -2415,7 +2650,9 @@ bic_update_firmware(uint8_t slot_id, uint8_t comp, char *path, uint8_t force) {
   int last_tunk_pcie_sw_flag = 0;
   while (1) {
     // For BIOS, send packets in blocks of 64K
-    if (comp == UPDATE_BIOS && ((offset+IPMB_WRITE_COUNT_MAX) > (i * BIOS_ERASE_PKT_SIZE))) {
+    if (comp == UPDATE_BIOS && bic_support_sha256_cmd) {
+      read_count = BIOS_UPDATE_PKT_SIZE;
+    } else if (comp == UPDATE_BIOS && ((offset+IPMB_WRITE_COUNT_MAX) > (i * BIOS_ERASE_PKT_SIZE))) {
       read_count = (i * BIOS_ERASE_PKT_SIZE) - offset;
       i++;
     } else if (comp == UPDATE_PCIE_SWITCH) {
@@ -2458,6 +2695,32 @@ bic_update_firmware(uint8_t slot_id, uint8_t comp, char *path, uint8_t force) {
 
     if (comp == UPDATE_PCIE_SWITCH) {
       rc = _update_pcie_sw_fw(slot_id, target, block_offset, count, st.st_size, buf);
+    } else if (comp == UPDATE_BIOS && bic_support_sha256_cmd) {
+
+      if (count != read_count) {
+        syslog(LOG_ERR, "read less than 64K, offset = 0x%x read_count=0x%x count=0x%x\n", offset, read_count,count);
+      }
+
+      //get packet sha256 from BIC
+      rc = bic_get_fw_sha256sum(slot_id, UPDATE_BIOS, offset, count, bic_sha256sum);
+      if (rc) {
+        printf("get sha256 form BIC fail !! \n");
+        goto error_exit;
+      }
+
+      //caclulate the 64K sha256 (count = 64K)
+      SHA256(buf, count, sha256sum);
+
+      //compare the sha256, if not same, need to send to BIC
+      if (memcmp(sha256sum, bic_sha256sum, SHA256_DIGEST_LENGTH) == 0) {
+        // printf("\n the %d's 64K sha256 is same, go to next 64k \n\n",offset/BIOS_UPDATE_PKT_SIZE);
+        offset += count;
+        printf("\rupdated bios: %d %%", offset/dsize);
+        continue;
+      }
+
+      //send 64K packet to BIC (count = 64K)
+      rc = send_large_packet_image(slot_id, target, offset, count, buf);
     } else {
       // Send data to Bridge-IC
       rc = _update_fw(slot_id, target, offset, count, buf);
@@ -2768,9 +3031,13 @@ bic_read_fruid(uint8_t slot_id, uint8_t fru_id, const char *path, int *fru_size)
 #endif
       goto error_exit;
     }
+    msleep(10);
 
     // Ignore the first byte as it indicates length of response
-    write(fd, &rbuf[1], rlen-1);
+    if (write(fd, &rbuf[1], rlen-1) < (rlen-1)) {
+      syslog(LOG_WARNING, "%s: write file failed, file: %s\n", __func__, path);
+      goto error_exit;
+    }
 
     // Update offset
     offset += (rlen-1);
@@ -2847,6 +3114,7 @@ bic_write_fruid(uint8_t slot_id, uint8_t fru_id, const char *path) {
     if (ret) {
       break;
     }
+    msleep(10);
 
     // Update counter
     offset += count;

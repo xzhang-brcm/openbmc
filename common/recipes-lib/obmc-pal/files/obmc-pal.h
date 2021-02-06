@@ -76,9 +76,79 @@ typedef struct _sensor_info_t {
   sdr_full_t sdr;
 } sensor_info_t;
 
+typedef struct _dimm_info {
+  uint8_t sled;
+  uint8_t socket;
+  uint8_t channel;
+  uint8_t slot;
+} _dimm_info;
+
+typedef enum {
+  FRU_TYPE_SERVER   = 0,
+  FRU_TYPE_NIC      = 1,
+  FRU_TYPE_BMC      = 2,
+  FRU_TYPE_DEVICE   = 3,
+} fru_type_t;
+
 enum {
   FRU_STATUS_BAD = 0,
   FRU_STATUS_GOOD = 1,
+};
+
+enum {
+  /* Does the FRU have a FRUID EEPROM? */
+  FRU_CAPABILITY_FRUID_WRITE = (1UL << 0),
+  FRU_CAPABILITY_FRUID_READ = (1UL << 1),
+  FRU_CAPABILITY_FRUID_ALL = FRU_CAPABILITY_FRUID_WRITE |
+                             FRU_CAPABILITY_FRUID_READ,
+
+  /* Sensors on this FRU */
+  FRU_CAPABILITY_SENSOR_READ = (1UL << 2),
+  FRU_CAPABILITY_SENSOR_THRESHOLD_UPDATE = (1UL << 3),
+  FRU_CAPABILITY_SENSOR_HISTORY = (1UL << 4),
+  FRU_CAPABILITY_SENSOR_ALL = FRU_CAPABILITY_SENSOR_READ |
+                              FRU_CAPABILITY_SENSOR_THRESHOLD_UPDATE |
+                              FRU_CAPABILITY_SENSOR_HISTORY,
+
+  /* Server capability */
+  FRU_CAPABILITY_SERVER = (1UL << 5),
+
+  /* NIC capability */
+  FRU_CAPABILITY_NETWORK_CARD = (1UL << 6),
+
+  /* FRU containing the BMC */
+  FRU_CAPABILITY_MANAGEMENT_CONTROLLER = (1UL << 7),
+
+  /* FRU supports power control */
+  FRU_CAPABILITY_POWER_STATUS = (1UL << 8),
+  FRU_CAPABILITY_POWER_ON = (1UL << 9),
+  FRU_CAPABILITY_POWER_OFF = (1UL << 10),
+  FRU_CAPABILITY_POWER_CYCLE = (1UL << 11),
+  FRU_CAPABILITY_POWER_RESET = (1UL << 12),
+  FRU_CAPABILITY_POWER_12V_ON = (1UL << 13),
+  FRU_CAPABILITY_POWER_12V_OFF = (1UL << 14),
+  FRU_CAPABILITY_POWER_12V_CYCLE = (1UL << 15),
+  FRU_CAPABILITY_POWER_FORCE_12V_ON = (1UL << 16),
+  FRU_CAPABILITY_POWER_FORCE_ON = (1UL << 17),
+  /* Server power, most platforms support at least this */
+  FRU_CAPABILITY_POWER_ALL = FRU_CAPABILITY_POWER_STATUS |
+                             FRU_CAPABILITY_POWER_ON |
+                             FRU_CAPABILITY_POWER_OFF |
+                             FRU_CAPABILITY_POWER_CYCLE |
+                             FRU_CAPABILITY_POWER_RESET,
+  /* Server 12V power, most multi-node supports at least this */
+  FRU_CAPABILITY_POWER_12V_ALL = FRU_CAPABILITY_POWER_12V_ON |
+                                 FRU_CAPABILITY_POWER_12V_OFF |
+                                 FRU_CAPABILITY_POWER_12V_CYCLE,
+
+  /* FRU/device contains one or more complex device on its board */
+  FRU_CAPABILITY_HAS_DEVICE = (1UL << 18),
+
+  /* Other capabilities can be added here in a
+   * backwards compatible way */
+
+  /* Magic to indicate all capabilities */
+  FRU_CAPABILITY_ALL = 0xffffffffUL
 };
 
 enum {
@@ -216,6 +286,8 @@ enum {
   SOFTWARE_NMI = 0x90,
   CPU0_THERM_STATUS = 0x1C,
   CPU1_THERM_STATUS = 0x1D,
+  CPU2_THERM_STATUS = 0x1E,
+  CPU3_THERM_STATUS = 0x1F,
   ME_POWER_STATE = 0x16,
   SPS_FW_HEALTH = 0x17,
   NM_EXCEPTION_A = 0x18,   // W100, FBTP, FBY2, YOSEMITE, FBTTN
@@ -288,6 +360,7 @@ int pal_get_bios_fixed_boot_device(uint8_t slot, uint8_t *fixed_boot_device);
 int pal_set_bios_restores_default_setting(uint8_t slot, uint8_t *default_setting);
 int pal_get_bios_restores_default_setting(uint8_t slot, uint8_t *default_setting);
 uint8_t pal_set_power_restore_policy(uint8_t slot, uint8_t *pwr_policy, uint8_t *res_data);
+uint8_t pal_set_slot_power_policy(uint8_t *pwr_policy, uint8_t *res_data);
 void pal_set_boot_option(unsigned char para,unsigned char* pbuff);
 int pal_get_boot_option(unsigned char para,unsigned char* pbuff);
 int pal_set_slot_led(uint8_t fru, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len);
@@ -316,6 +389,7 @@ int pal_set_rst_btn(uint8_t slot, uint8_t status);
 int pal_set_led(uint8_t led, uint8_t status);
 int pal_set_hb_led(uint8_t status);
 int pal_get_fru_list(char *list);
+int pal_get_dev_list(uint8_t fru, char *list);
 int pal_get_fru_id(char *fru_str, uint8_t *fru);
 int pal_get_dev_id(char *fru_str, uint8_t *fru);
 int pal_get_fru_name(uint8_t fru, char *name);
@@ -391,6 +465,7 @@ void pal_i2c_crash_deassert_handle(int i2c_bus_num);
 int pal_set_machine_configuration(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len);
 int pal_handle_string_sel(char *log, uint8_t log_len);
 int pal_set_adr_trigger(uint8_t slot, bool trigger);
+int pal_flock_flag_retry(int fd, unsigned flag);
 int pal_flock_retry(int fd);
 int pal_unflock_retry(int fd);
 int pal_devnum_to_fruid(int devnum);
@@ -414,6 +489,7 @@ int pal_get_gpio_value(int gpio_num, uint8_t *value);
 int pal_ipmb_processing(int bus, void *buf, uint16_t size);
 int pal_ipmb_finished(int bus, void *buf, uint16_t size);
 int pal_bypass_cmd(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len);
+int pal_bypass_dev_card(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len);
 void pal_set_def_restart_cause(uint8_t slot);
 int pal_compare_fru_data(char *fru_out, char *fru_in, int cmp_size);
 int pal_sensor_thresh_modify(uint8_t fru,  uint8_t sensor_num, uint8_t thresh_type, float value);
@@ -464,6 +540,7 @@ void pal_get_eth_intf_name(char *intf_name);
 int pal_get_host_system_mode(uint8_t *mode);
 int pal_get_altered_comp_name(char *comp_name);
 int pal_sensor_monitor_initial(void);
+int pal_sensor_thresh_init(void);
 uint8_t pal_ipmb_get_sensor_val(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len);
 int pal_set_host_system_mode(uint8_t mode);
 int pal_is_pfr_active(void);
@@ -471,6 +548,11 @@ int pal_get_pfr_address(uint8_t fru, uint8_t *bus, uint8_t *addr, bool *bridged)
 int pal_get_pfr_update_address(uint8_t fru, uint8_t *bus, uint8_t *addr, bool *bridged);
 int pal_get_dev_card_sensor(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len);
 int pal_set_bios_cap_fw_ver(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len);
+int pal_is_sensor_valid(uint8_t fru, uint8_t snr_num);
+int pal_get_fru_type_list(fru_type_t fru_type, const char ***fru_list, uint8_t* num_fru);
+int pal_get_fw_ver(uint8_t slot, uint8_t *req_data, uint8_t *res_data, uint8_t *res_len);
+int pal_get_fru_capability(uint8_t fru, unsigned int *caps);
+int pal_get_dev_capability(uint8_t fru, uint8_t dev, unsigned int *caps);
 
 #ifdef __cplusplus
 }

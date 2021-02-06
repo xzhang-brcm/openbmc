@@ -18,7 +18,9 @@
 FILESEXTRAPATHS_prepend := "${THISDIR}/files:"
 
 SRC_URI += "file://mTerm/run \
+        file://mTerm_server.service \
            "
+MTERM_SYSTEMD_SERVICES = "mTerm_server.service"
 
 S = "${WORKDIR}"
 

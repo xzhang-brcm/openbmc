@@ -1,39 +1,62 @@
 {
-    "version": "fbal-r03",
+    "version": "fbal-r10",
     "pwm_transition_value": 70,
     "pwm_boost_value": 100,
     "sample_interval_ms": 3000,
     "fan_recovery_time": 2,
+    "sensor_filter_all": true,
     "boost": {
       "fan_fail": true,
-      "sensor_fail": false
+      "sensor_fail": true
     },
     "sensor_valid_check": {
-      "mb": {
+      "(.*)cpu": {
         "attribute": {
           "type" : "power_status"
         }
       }
-    },  
+    },
     "watchdog": false,
-    "min_rpm": 1500,
+    "min_rpm": 600,
     "profiles": {
       "linear_mezz": {
         "read_source" : {
           "util" : "/usr/local/bin/sensor-util"
         },
         "type": "linear",
+        "positive_hysteresis": 0,
+        "negative_hysteresis": 2,
         "data": [
-          [65, 8],
-          [70, 10],
-          [72, 13],
-          [75, 15],
-          [78, 18],
-          [80, 20],
-          [83, 25],
-          [85, 30],
-          [90, 35],
-          [95, 60]
+          [79, 15],
+          [81, 18],
+          [95, 70]
+        ]
+      },
+      "pid_mezz": {
+        "read_source" : {
+          "util" : "/usr/local/bin/sensor-util"
+        },
+        "type": "pid",
+        "positive_hysteresis": 0,
+        "negative_hysteresis": 2,
+        "setpoint": 83,
+        "kp": -3,
+        "ki": -0.0035,
+        "kd": 0
+      },
+      "linear_inlet": {
+        "read_source" : {
+          "util" : "/usr/local/bin/sensor-util"
+        },
+        "type": "linear",
+        "positive_hysteresis": 0,
+        "negative_hysteresis": 2,
+        "data": [
+          [25, 20],
+          [30, 23],
+          [35, 25],
+          [38, 35],
+          [40, 80]
         ]
       },
       "linear_vr": {
@@ -41,26 +64,15 @@
           "util" : "/usr/local/bin/sensor-util"
         },
         "type": "linear",
+        "positive_hysteresis": 0,
+        "negative_hysteresis": 2,
         "data": [
-          [70, 20],
-          [75, 25],
-          [80, 30],
+          [70, 15],
+          [75, 20],
+          [80, 25],
           [85, 35],
           [90, 60],
           [95, 65]
-        ]
-      },    
-      "linear_inlet": {
-        "read_source" : {
-          "util" : "/usr/local/bin/sensor-util"
-        },
-        "type": "linear",
-        "data": [
-          [25, 10],
-          [30, 10],
-          [35, 15],
-          [38, 25],
-          [40, 70]
         ]
       }
     },
@@ -70,7 +82,7 @@
           "util" : "/usr/local/bin/fan-util --get 0"
         },
         "write_source" : {
-          "util" : "/usr/local/bin/fan-util --set %d 0"
+          "util" : "/usr/local/bin/fan-util --set %d"
         }
       },
       "1": {
@@ -78,7 +90,7 @@
           "util" : "/usr/local/bin/fan-util --get 1"
         },
         "write_source" : {
-          "util" : "/usr/local/bin/fan-util --set %d 0"
+          "util" : "/usr/local/bin/fan-util --set %d"
         }
       },
       "2": {
@@ -86,7 +98,7 @@
           "util" : "/usr/local/bin/fan-util --get 2"
         },
         "write_source" : {
-          "util" : "/usr/local/bin/fan-util --set %d 1"
+          "util" : "/usr/local/bin/fan-util --set %d"
         }
       },
       "3": {
@@ -94,7 +106,7 @@
           "util" : "/usr/local/bin/fan-util --get 3"
         },
         "write_source" : {
-          "util" : "/usr/local/bin/fan-util --set %d 1"
+          "util" : "/usr/local/bin/fan-util --set %d"
         }
       },
       "4": {
@@ -102,7 +114,7 @@
           "util" : "/usr/local/bin/fan-util --get 4"
         },
         "write_source" : {
-          "util" : "/usr/local/bin/fan-util --set %d 2"
+          "util" : "/usr/local/bin/fan-util --set %d"
         }
       },
       "5": {
@@ -110,7 +122,7 @@
           "util" : "/usr/local/bin/fan-util --get 5"
         },
         "write_source" : {
-          "util" : "/usr/local/bin/fan-util --set %d 2"
+          "util" : "/usr/local/bin/fan-util --set %d"
         }
       },
       "6": {
@@ -118,7 +130,7 @@
           "util" : "/usr/local/bin/fan-util --get 6"
         },
         "write_source" : {
-          "util" : "/usr/local/bin/fan-util --set %d 3"
+          "util" : "/usr/local/bin/fan-util --set %d"
         }
       },
       "7": {
@@ -126,14 +138,14 @@
           "util" : "/usr/local/bin/fan-util --get 7"
         },
         "write_source" : {
-          "util" : "/usr/local/bin/fan-util --set %d 3"
+          "util" : "/usr/local/bin/fan-util --set %d"
         }
       }
     },
     "zones": {
       "zone_1": {
-        "pwm_output": [0, 2, 4, 6],
+        "pwm_output": [0],
         "expr_file": "zone1_Slave.fsc"
       }
     }
-} 
+}

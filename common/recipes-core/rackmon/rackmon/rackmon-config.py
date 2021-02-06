@@ -1,3 +1,6 @@
+import fcntl
+import sys
+
 from rackmond import configure_rackmond
 
 
@@ -86,6 +89,9 @@ reglist = [
     {"begin": 0x9F, "length": 1},  # BBU Temp
     {"begin": 0xA0, "length": 1},  # Temp 1
     {"begin": 0xA1, "length": 1},  # BBU Max Error
+    {"begin": 0xA3, "length": 1},  # Communication baud rate
+    {"begin": 0xA4, "length": 1},  # Charging constant current level override
+    {"begin": 0xA5, "length": 1},  # Computed charging constant current level
     {"begin": 0xD0, "length": 1},  # General Alarm Status Register
     {"begin": 0xD1, "length": 1},  # PFC Alarm Status Register
     {"begin": 0xD2, "length": 1},  # LLC Alarm Status Register
@@ -104,7 +110,37 @@ reglist = [
     {"begin": 0x115, "length": 8},  # BBU Device Name
     {"begin": 0x11D, "length": 4},  # FB Battery Status
     {"begin": 0x121, "length": 1},  # SoH results
+    {"begin": 0x122, "length": 1},  # Fan RPM Override
+    {"begin": 0x123, "length": 1},  # Rack_monitor_BBU_control_enable
+    {"begin": 0x124, "length": 1},  # LED Override
+    {"begin": 0x125, "length": 1},  # PSU input frequency AC
+    {"begin": 0x126, "length": 1},  # PSU power factor
+    {"begin": 0x127, "length": 1},  # PSU iTHD
+    {"begin": 0x128, "length": 2},  # PSU CC charge failure timeout
+    {"begin": 0x12A, "length": 2},  # Time stamping for blackbox
+    {"begin": 0x12C, "length": 2},  # Variable Charger Override timeout
+    {"begin": 0x12E, "length": 1},  # Configurable BBU backup time(90s-1200s)
+    {"begin": 0x12F, "length": 1},  # Configurable PLS timing(1s-300s)
+    {"begin": 0x130, "length": 1},  # Forced discharge timeout
 ]
+
+pid_file_handle = None
+pid_file_path = "/var/lock/rackmon-config.pid"
+
+
+def file_is_locked(pathname):
+    global pid_file_handle
+
+    # Note: the file handle is not closed in the program, and it is by
+    # design because we need to hold the file lock as long as the process
+    # is running. The file will be automatically closed (and lock released)
+    # when the process is terminated.
+    pid_file_handle = open(pathname, "w")
+    try:
+        fcntl.lockf(pid_file_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return False
+    except IOError:
+        return True
 
 
 def main():
@@ -112,4 +148,8 @@ def main():
 
 
 if __name__ == "__main__":
+    if file_is_locked(pid_file_path):
+        print("another instance is running. Exiting!")
+        sys.exit(0)
+
     main()

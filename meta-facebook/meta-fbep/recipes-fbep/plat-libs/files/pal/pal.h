@@ -44,8 +44,6 @@ extern "C" {
 
 #define PFR_MAILBOX_BUS  (4)
 #define PFR_MAILBOX_ADDR (0xB0)
-#define MAIN_CPLD_BUS  (4)
-#define MAIN_CPLD_ADDR (0x84)
 
 extern size_t pal_pwm_cnt;
 extern size_t pal_tach_cnt;
@@ -59,6 +57,14 @@ enum {
   FRU_MB,
   FRU_PDB,
   FRU_BSM,
+  FRU_ASIC0,
+  FRU_ASIC1,
+  FRU_ASIC2,
+  FRU_ASIC3,
+  FRU_ASIC4,
+  FRU_ASIC5,
+  FRU_ASIC6,
+  FRU_ASIC7,
 };
 
 enum {
@@ -73,7 +79,7 @@ enum {
   PCH,
 };
 
-#define MAX_NUM_FRUS 3
+#define MAX_NUM_FRUS 11
 #define MAX_NODES    1
 
 int read_device(const char *device, int *value);
@@ -83,7 +89,7 @@ bool is_device_ready(void);
 int pal_get_server_power(uint8_t fru, uint8_t *status);
 int pal_get_platform_id(uint8_t *id);
 int pal_set_id_led(uint8_t status);
-int pal_check_power_seq(void);
+int pal_force_sled_cycle(void);
 #ifdef __cplusplus
 } // extern "C"
 #endif

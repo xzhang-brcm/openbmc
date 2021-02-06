@@ -6,11 +6,11 @@
 #define CMD_CMC_GET_FAN_DUTY              (0x07)
 #define CMD_CMC_SET_FAN_DUTY              (0x08)
 #define CMD_CMC_SET_FAN_CONTROL_STATUS    (0x0E)
-#define CMD_CMC_POWER_CYCLE               (0x62)
 #define CMD_CMC_GET_CONFIG_MODE           (0x63)
 #define CMD_CMC_SET_SYSTEM_MODE           (0x64)
-#define CMD_CMC_SLED_CYCLE                (0x66)
 #define CMD_CMC_REQ_DC_ON                 (0x68)
+#define CMD_CMC_SLED_CYCLE                (0x70)
+#define CMD_CMC_POWER_CYCLE               (0x72)
 #define CMD_CMC_GET_MB_POSITION           (0x0F)
 #define CMD_CMC_OEM_GET_SENSOR_READING    (0xF1)
 #define CMD_CMC_OEM_SET_BLOCK_COMMON_FLAG (0xF2)
@@ -27,12 +27,18 @@
 #define CM_COMMAND_UNBLOCK                (0x00)
 #define CM_COMMAND_BLOCK                  (0x01)
 
+#define UPDATE_BIOS_BLOCK       (1 << 1)
+#define UPDATE_CM_BLOCK         (1 << 2)
+#define UPDATE_VR_BLOCK         (1 << 3)
+#define UPDATE_GLOB_PLD_BLOCK   (1 << 4)
+#define UPDATE_MAIN_PLD_BLOCK   (1 << 8)
+#define UPDATE_MOD_PLD_BLOCK    (1 << 9)
 
 #define PDB_EVENT_STATUS        (0xFB)
-#define PDB_EVENT_FAN0_PRESENT  (0x2C) 
-#define PDB_EVENT_FAN1_PRESENT  (0x2D) 
-#define PDB_EVENT_FAN2_PRESENT  (0x2E) 
-#define PDB_EVENT_FAN3_PRESENT  (0x2F) 
+#define PDB_EVENT_FAN0_PRESENT  (0x2C)
+#define PDB_EVENT_FAN1_PRESENT  (0x2D)
+#define PDB_EVENT_FAN2_PRESENT  (0x2E)
+#define PDB_EVENT_FAN3_PRESENT  (0x2F)
 
 
 //CMC SENSOR TABLE
@@ -55,6 +61,10 @@ enum {
   CM_SNR_FAN1_CURR = 0xA1,
   CM_SNR_FAN2_CURR = 0xA2,
   CM_SNR_FAN3_CURR = 0xA3,
+  CM_SNR_FAN0_POWER = 0xB0,
+  CM_SNR_FAN1_POWER = 0xB1,
+  CM_SNR_FAN2_POWER = 0xB2,
+  CM_SNR_FAN3_POWER = 0xB3,
   CM_SNR_HSC_VIN = 0xC0,
   CM_SNR_HSC_IOUT = 0xC1,
   CM_SNR_HSC_TEMP = 0xC2,
@@ -132,7 +142,9 @@ int lib_cmc_get_fan_speed(uint8_t fan_id, uint16_t* speed);
 int lib_cmc_set_fan_ctrl(uint8_t fan_mode, uint8_t* status);
 int lib_cmc_get_fan_id(uint8_t fan_sdr);
 int lib_cmc_power_cycle(void);
+int lib_cmc_bios_update_ac(void);
 int lib_cmc_set_block_command_flag(uint8_t index, uint8_t flag);
+int lib_cmc_get_block_command_flag(uint8_t* rbuf, uint8_t* rlen);
 int lib_cmc_get_block_index(uint8_t fru);
 int lib_cmc_req_dc_on(void);
 #endif

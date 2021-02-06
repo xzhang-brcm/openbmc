@@ -20,7 +20,6 @@
 
 import re
 
-import rest_fruid_scm
 import rest_fw_ver
 import rest_peutil
 import rest_pim_present
@@ -36,7 +35,7 @@ from rest_utils import dumps_bytestr, get_endpoints
 class boardApp_Handler:
     # Handler for sys/mb/fruid/scm resource endpoint
     async def rest_fruid_scm_hdl(self, request):
-        return web.json_response(rest_fruid_scm.get_fruid_scm(), dumps=dumps_bytestr)
+        return web.json_response(rest_seutil.get_seutil(), dumps=dumps_bytestr)
 
     # Handler for sys/mb/scdinfo resource endpoint
     async def rest_scdinfo_hdl(self, request):
@@ -73,3 +72,23 @@ class boardApp_Handler:
     async def rest_firmware_info_all_hdl(self, request):
         fws = await rest_fw_ver.get_all_fw_ver()
         return web.json_response(fws, dumps=dumps_bytestr)
+
+    # /api/sys/firmware_info
+    async def rest_firmware_info_hdl(self, request):
+        path = request.rel_url.path
+        details = {
+            "Information": {"Description": "Firmware versions"},
+            "Actions": [],
+            "Resources": get_endpoints(path),
+        }
+        return web.json_response(details, dumps=dumps_bytestr)
+
+    # /api/sys/mb/pim$
+    async def rest_pim_endpoint_info_hdl(self, request):
+        path = request.rel_url.path
+        details = {
+            "Information": {"Description": "Plug-in Module"},
+            "Actions": [],
+            "Resources": get_endpoints(path),
+        }
+        return web.json_response(details, dumps=dumps_bytestr)

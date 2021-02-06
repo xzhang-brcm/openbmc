@@ -70,6 +70,9 @@ extern "C" int sensors_read_fan(const char *label, float *value)
   if (sensors.find("aspeed_pwm_tacho-isa-0000") != sensors.end()) {
     return sensors_read("aspeed_pwm_tacho-isa-0000", label, value);
   }
+  if (sensors.find("aspeed_pwm_tachometer-isa-0000") != sensors.end()) {
+    return sensors_read("aspeed_pwm_tachometer-isa-0000", label, value);
+  }
   return sensors_read("ast_pwm-isa-0000", label, value);
 }
 
@@ -77,6 +80,9 @@ extern "C" int sensors_write_fan(const char *label, float value)
 {
   if (sensors.find("aspeed_pwm_tacho-isa-0000") != sensors.end()) {
     return sensors_write("aspeed_pwm_tacho-isa-0000", label, value);
+  }
+  if (sensors.find("aspeed_pwm_tachometer-isa-0000") != sensors.end()) {
+    return sensors_write("aspeed_pwm_tachometer-isa-0000", label, value);
   }
   return sensors_write("ast_pwm-isa-0000", label, value);
 }
@@ -89,3 +95,7 @@ extern "C" int sensors_read_adc(const char *label, float *value)
   return sensors_read("ast_adc-isa-0000", label, value);
 }
 
+extern "C" void sensors_reinit()
+{
+  sensors.re_enumerate(SENSOR_CONF);
+}

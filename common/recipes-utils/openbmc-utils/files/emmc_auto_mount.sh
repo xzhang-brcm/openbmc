@@ -60,7 +60,17 @@ emmc_mount_precheck() {
     fi
 
     if fw_printenv | grep "emmc_auto_mount=no" > /dev/null 2>&1; then
-        echo "emmc_auto_mount is disabled. Skip emmc mount."
+        echo "emmc_auto_mount is disabled by uboot env. Skip emmc mount."
+        exit 0
+    fi
+
+    if [ "x$(kv get emmc_auto_mount persistent || true)" = "xno" ]; then
+        echo "emmc_auto_mount is disabled by persistent kv. Skip emmc mount."
+        exit 0
+    fi
+
+    if [ "x$(kv get emmc_auto_mount || true)" = "xno" ]; then
+        echo "emmc_auto_mount is disabled by temporary kv. Skip emmc mount."
         exit 0
     fi
 }
@@ -81,3 +91,6 @@ if timeout --help 2>&1 | grep "Usage:.*\[\-t " > /dev/null 2>&1; then
 else
     timeout "$MOUNT_TIMEOUT" "$MOUNT_SCRIPT" "$MMC_DEVICE" "$MOUNT_POINT"
 fi
+
+# Create the rsyslog directory, in case it doesn't exist.
+mkdir -p "$MOUNT_POINT/log"

@@ -26,8 +26,7 @@ from rest_fruid import get_fruid
 
 
 # Handler for SCM FRUID resource endpoint
-# In ELBERT, SUP is equivalent to SCM
 def get_fruid_scm():
-    cmd = ["weutil", "SUP"]
+    cmd = ["weutil", "SCM"]
     fresult = get_fruid(cmd)
     return fresult

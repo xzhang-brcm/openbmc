@@ -108,13 +108,13 @@ i2c_device_add "$(get_mux_bus_num 2-0070 3)" 0x52 24c64   # EEPROM
 # # i2c-mux 2, channel 5
 i2c_device_add "$(get_mux_bus_num 2-0070 4)" 0x50 24c02   # BMC54616S EEPROM
 
+# Wedge400 DVT2 or later, wedge400c EVT2 or later has BSM eeprom
+if [[ "$brd_type" -eq 0 && "$brd_rev" -ge 3 ]] || [[ "$brd_type" -eq 1 && "$brd_rev" -ge 1 ]]; then
+i2c_device_add "$(get_mux_bus_num 2-0070 6)" 0x56 24c64   # BSM EEPROM
+fi
+
 # # i2c-mux 8-0070, channel 1
-is_pem1=$(
-    pem-util pem1 --get_pem_info | grep WEDGE400-PEM
-    echo $?
-)
-# # ltc4282 only support registers 0~0x4f
-if [ "$is_pem1" = "1" ]; then
+if [ "$(wedge_power_supply_type 1)" = "PSU" ]; then
     i2c_device_add "$(get_mux_bus_num 8-0070 0)" 0x58 psu_driver   # PSU1 Driver
 else
     i2c_device_add "$(get_mux_bus_num 8-0070 0)" 0x58 ltc4282      # PEM1 Driver
@@ -122,11 +122,7 @@ else
 fi
 
 # # i2c-mux 8-0070, channel 2
-is_pem2=$(
-    pem-util pem2 --get_pem_info | grep WEDGE400-PEM
-    echo $?
-)
-if [ "$is_pem2" = "1" ]; then
+if [ "$(wedge_power_supply_type 2)" = "PSU" ]; then
     i2c_device_add "$(get_mux_bus_num 8-0070 1)" 0x58 psu_driver   # PSU2 Driver
 else
     i2c_device_add "$(get_mux_bus_num 8-0070 1)" 0x58 ltc4282      # PEM2 Driver

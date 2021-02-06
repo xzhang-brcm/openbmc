@@ -1221,6 +1221,48 @@ pal_get_fru_list(char *list) {
 }
 
 int
+pal_get_fru_capability(uint8_t fru, unsigned int *caps)
+{
+  int ret = 0;
+
+  switch (fru) {
+    case FRU_SMB:
+      *caps = FRU_CAPABILITY_SENSOR_ALL |
+        FRU_CAPABILITY_MANAGEMENT_CONTROLLER;
+      break;
+    case FRU_SCM:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL;
+      break;
+    case FRU_PIM1:
+    case FRU_PIM2:
+    case FRU_PIM3:
+    case FRU_PIM4:
+    case FRU_PIM5:
+    case FRU_PIM6:
+    case FRU_PIM7:
+    case FRU_PIM8:
+    case FRU_PSU1:
+    case FRU_PSU2:
+    case FRU_PSU3:
+    case FRU_PSU4:
+    case FRU_FAN1:
+    case FRU_FAN2:
+    case FRU_FAN3:
+    case FRU_FAN4:
+    case FRU_FAN5:
+    case FRU_FAN6:
+    case FRU_FAN7:
+    case FRU_FAN8:
+      *caps = FRU_CAPABILITY_SENSOR_ALL;
+      break;
+    default:
+      ret = -1;
+      break;
+  }
+  return ret;
+}
+
+int
 pal_get_fru_id(char *str, uint8_t *fru) {
   if (!strcmp(str, "all")) {
     *fru = FRU_ALL;
@@ -2067,6 +2109,22 @@ pal_set_com_pwr_btn_n(char *status) {
   return 0;
 }
 
+int
+pal_get_com_pwr_btn_n(void) {
+  int ret;
+  int val;
+  ret = read_device(SCM_COM_PWR_BTN, &val);
+  if (ret) {
+#ifdef DEBUG
+  syslog(LOG_WARNING, "read_device failed for %s\n", SCM_COM_PWR_BTN);
+#endif
+    return -1;
+  }
+
+  return val;
+}
+
+
 static bool
 is_server_on(void) {
   int ret;
@@ -2090,18 +2148,29 @@ server_power_on(void) {
     if (pal_set_com_pwr_btn_n("1")) {
       return -1;
     }
+    sleep(1);
+    if (pal_get_com_pwr_btn_n() != 1){
+        syslog(LOG_WARNING, "%s: Failed to write to com_pwr_btn_n", __func__);
+        return -1;
+    }
 
     if (pal_set_com_pwr_btn_n("0")) {
       return -1;
     }
     sleep(1);
-
+    if (pal_get_com_pwr_btn_n() != 0){
+        syslog(LOG_WARNING, "%s: Failed to write to com_pwr_btn_n", __func__);
+        return -1;
+    }
     if (pal_set_com_pwr_btn_n("1")) {
       return -1;
     }
     /* Wait for server power good ready */
     sleep(1);
-
+    if (pal_get_com_pwr_btn_n() != 1){
+        syslog(LOG_WARNING, "%s: Failed to write to com_pwr_btn_n", __func__);
+        return -1;
+    }
     if (!is_server_on()) {
       return -1;
     }
@@ -2120,17 +2189,24 @@ server_power_on(void) {
 static int
 server_power_off(bool gs_flag) {
   int ret;
-
   if (gs_flag) {
     ret = pal_set_com_pwr_btn_n("0");
     if (ret) {
       return -1;
     }
     sleep(DELAY_GRACEFUL_SHUTDOWN);
-
+    if (pal_get_com_pwr_btn_n() != 0){
+        syslog(LOG_WARNING, "%s: Failed to write to com_pwr_btn_n", __func__);
+        return -1;
+    }
     ret = pal_set_com_pwr_btn_n("1");
     if (ret) {
       return -1;
+    }
+    sleep(1);
+    if (pal_get_com_pwr_btn_n() != 1){
+        syslog(LOG_WARNING, "%s: Failed to write to com_pwr_btn_n", __func__);
+        return -1;
     }
   } else {
     ret = write_device(SCM_COM_PWR_ENBLE, "0");
@@ -3804,11 +3880,15 @@ pim_sensor_read(uint8_t fru, uint8_t sensor_num, float *value) {
 
 static int
 psu_init_acok_key(uint8_t fru) {
-  uint8_t psu_num = fru - 10;
+  uint8_t psu_num;
   char key[MAX_KEY_LEN + 1];
 
-  snprintf(key, MAX_KEY_LEN, "psu%d_acok_state", psu_num);
-  kv_set(key, "1", 0, KV_FCREATE);
+  if ((fru >= FRU_PSU1) && (fru <= FRU_PSU4)) {
+    psu_num = (fru - FRU_PSU1 + 1); /* 1-based index */
+
+    snprintf(key, MAX_KEY_LEN, "psu%d_acok_state", psu_num);
+    kv_set(key, "1", 0, KV_FCREATE);
+  }
 
   return 0;
 }

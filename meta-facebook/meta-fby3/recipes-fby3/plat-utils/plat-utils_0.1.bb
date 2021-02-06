@@ -28,8 +28,8 @@ SRC_URI = "file://ast-functions \
            file://COPYING \
            file://setup-dev.sh \
            file://sol-util \
-           file://setup-pfr.sh \
            file://setup-sic.sh \
+           file://check_eth0_ipv4.sh \
           "
 
 pkgdir = "utils"
@@ -74,13 +74,13 @@ do_install() {
   install -m 755 power-on.sh ${D}${sysconfdir}/init.d/power-on.sh
   update-rc.d -r ${D} power-on.sh start 70 5 .
 
+  # install check_eth0_ipv4.sh
+  install -m 755 check_eth0_ipv4.sh ${D}${sysconfdir}/init.d/check_eth0_ipv4.sh
+  update-rc.d -r ${D} check_eth0_ipv4.sh start 71 5 .
+
   # install setup-sic.sh
   install -m 755 setup-sic.sh ${D}${sysconfdir}/init.d/setup-sic.sh
   update-rc.d -r ${D} setup-sic.sh start 68 5 .
-
-  # install setup-pfr.sh
-  install -m 755 setup-pfr.sh ${D}${sysconfdir}/init.d/setup-pfr.sh
-  update-rc.d -r ${D} setup-pfr.sh start 99 5 .
 
 }
 

@@ -26,6 +26,8 @@
 #define PWM_PLAT_SET 0x80
 #define PWM_MASK     0x0f
 
+#define DEVICE_KEY "sys_config/fru%d_B_drive0_model_name"
+
 enum {
   /* Fan Type */
   DUAL_TYPE    = 0x00,
@@ -150,7 +152,6 @@ const uint8_t bic_sensor_list[] = {
   BIC_SENSOR_DIMMD0_TEMP,
   BIC_SENSOR_DIMME0_TEMP,
   BIC_SENSOR_DIMMF0_TEMP,
-  BIC_SENSOR_M2A_TEMP,
   BIC_SENSOR_M2B_TEMP,
   BIC_SENSOR_HSC_TEMP,
   BIC_SENSOR_VCCIN_VR_TEMP,
@@ -274,6 +275,102 @@ const uint8_t bic_1ou_edsff_sensor_list[] = {
   BIC_1OU_EDSFF_SENSOR_NUM_ADC_12V_VOL_M2D,
 };
 
+const uint8_t bic_2ou_gpv3_sensor_list[] = {
+  // temperature
+  BIC_GPV3_INLET_TEMP,
+  BIC_GPV3_PCIE_SW_TEMP,
+
+  // adc voltage
+  BIC_GPV3_ADC_P12V_STBY_VOL,
+  BIC_GPV3_ADC_P3V3_STBY_AUX_VOL,
+  BIC_GPV3_ADC_P1V8_VOL,
+
+  // P3V3 STBY1~3 
+  BIC_GPV3_P3V3_STBY1_POWER,
+  BIC_GPV3_P3V3_STBY1_VOLTAGE,
+  BIC_GPV3_P3V3_STBY1_CURRENT,
+  BIC_GPV3_P3V3_STBY1_TEMP,
+  BIC_GPV3_P3V3_STBY2_POWER,
+  BIC_GPV3_P3V3_STBY2_VOLTAGE,
+  BIC_GPV3_P3V3_STBY2_CURRENT,
+  BIC_GPV3_P3V3_STBY2_TEMP,
+  BIC_GPV3_P3V3_STBY3_POWER,
+  BIC_GPV3_P3V3_STBY3_VOLTAGE,
+  BIC_GPV3_P3V3_STBY3_CURRENT,
+  BIC_GPV3_P3V3_STBY3_TEMP,
+
+  //VR P0V84
+  BIC_GPV3_VR_P0V84_POWER,
+  BIC_GPV3_VR_P0V84_VOLTAGE,
+  BIC_GPV3_VR_P0V84_CURRENT,
+  BIC_GPV3_VR_P0V84_TEMP,
+
+  //VR P1V8
+  BIC_GPV3_VR_P1V8_POWER,
+  BIC_GPV3_VR_P1V8_VOLTAGE,
+  BIC_GPV3_VR_P1V8_CURRENT,
+  BIC_GPV3_VR_P1V8_TEMP,
+
+  //E1S
+  BIC_GPV3_E1S_1_12V_POWER,
+  BIC_GPV3_E1S_1_12V_VOLTAGE,
+  BIC_GPV3_E1S_1_12V_CURRENT,
+  BIC_GPV3_E1S_1_TEMP,
+  BIC_GPV3_E1S_2_12V_POWER,
+  BIC_GPV3_E1S_2_12V_VOLTAGE,
+  BIC_GPV3_E1S_2_12V_CURRENT,
+  BIC_GPV3_E1S_2_TEMP,
+
+  //INA233 DEV0~11
+  BIC_GPV3_INA233_PWR_DEV0,
+  BIC_GPV3_INA233_VOL_DEV0,
+  BIC_GPV3_NVME_TEMP_DEV0,
+
+  BIC_GPV3_INA233_PWR_DEV1,
+  BIC_GPV3_INA233_VOL_DEV1,
+  BIC_GPV3_NVME_TEMP_DEV1,
+
+  BIC_GPV3_INA233_PWR_DEV2,
+  BIC_GPV3_INA233_VOL_DEV2,
+  BIC_GPV3_NVME_TEMP_DEV2,
+
+  BIC_GPV3_INA233_PWR_DEV3,
+  BIC_GPV3_INA233_VOL_DEV3,
+  BIC_GPV3_NVME_TEMP_DEV3,
+
+  BIC_GPV3_INA233_PWR_DEV4,
+  BIC_GPV3_INA233_VOL_DEV4,
+  BIC_GPV3_NVME_TEMP_DEV4,
+
+  BIC_GPV3_INA233_PWR_DEV5,
+  BIC_GPV3_INA233_VOL_DEV5,
+  BIC_GPV3_NVME_TEMP_DEV5,
+
+  BIC_GPV3_INA233_PWR_DEV6,
+  BIC_GPV3_INA233_VOL_DEV6,
+  BIC_GPV3_NVME_TEMP_DEV6,
+
+  BIC_GPV3_INA233_PWR_DEV7,
+  BIC_GPV3_INA233_VOL_DEV7,
+  BIC_GPV3_NVME_TEMP_DEV7,
+
+  BIC_GPV3_INA233_PWR_DEV8,
+  BIC_GPV3_INA233_VOL_DEV8,
+  BIC_GPV3_NVME_TEMP_DEV8,
+
+  BIC_GPV3_INA233_PWR_DEV9,
+  BIC_GPV3_INA233_VOL_DEV9,
+  BIC_GPV3_NVME_TEMP_DEV9,
+
+  BIC_GPV3_INA233_PWR_DEV10,
+  BIC_GPV3_INA233_VOL_DEV10,
+  BIC_GPV3_NVME_TEMP_DEV10,
+  
+  BIC_GPV3_INA233_PWR_DEV11,
+  BIC_GPV3_INA233_VOL_DEV11,
+  BIC_GPV3_NVME_TEMP_DEV11,
+};
+
 //BIC BaseBoard Sensors
 const uint8_t bic_bb_sensor_list[] = {
   BIC_BB_SENSOR_INLET_TEMP,
@@ -318,6 +415,7 @@ const uint8_t bic_spe_sensor_list[] = {
 };
 
 const uint8_t bic_skip_sensor_list[] = {
+  BIC_SENSOR_PCH_TEMP,
   BIC_SENSOR_CPU_TEMP,
   BIC_SENSOR_DIMMA0_TEMP,
   BIC_SENSOR_DIMMB0_TEMP,
@@ -326,7 +424,6 @@ const uint8_t bic_skip_sensor_list[] = {
   BIC_SENSOR_DIMME0_TEMP,
   BIC_SENSOR_DIMMF0_TEMP,
   BIC_SENSOR_M2B_TEMP,
-  BIC_SENSOR_HSC_TEMP,
   BIC_SENSOR_VCCIN_VR_TEMP,
   BIC_SENSOR_VCCSA_VR_TEMP,
   BIC_SENSOR_VCCIO_VR_Temp,
@@ -336,7 +433,6 @@ const uint8_t bic_skip_sensor_list[] = {
   BIC_SENSOR_VCCIN_VR_VOL,
   BIC_SENSOR_VCCSA_VR_VOL,
   BIC_SENSOR_VCCIO_VR_VOL,
-  BIC_SENSOR_P3V3_STBY_VR_VOL,
   BIC_PVDDQ_ABC_VR_VOL,
   BIC_PVDDQ_DEF_VR_VOL,
   //BIC - current sensors
@@ -393,6 +489,85 @@ const uint8_t bic_2ou_skip_sensor_list[] = {
   BIC_2OU_EXP_SENSOR_P3V3_M2F_TMP,
 };
 
+const uint8_t bic_2ou_gpv3_skip_sensor_list[] = {
+  //BIC 2OU GPv3 Sensors
+  BIC_GPV3_PCIE_SW_TEMP, // 0x92
+
+  // adc voltage
+  BIC_GPV3_ADC_P1V8_VOL, //0x9F
+
+  //VR P0V84
+  BIC_GPV3_VR_P0V84_POWER,
+  BIC_GPV3_VR_P0V84_VOLTAGE,
+  BIC_GPV3_VR_P0V84_CURRENT,
+  BIC_GPV3_VR_P0V84_TEMP,
+
+  //VR P1V8
+  BIC_GPV3_VR_P1V8_POWER,
+  BIC_GPV3_VR_P1V8_VOLTAGE,
+  BIC_GPV3_VR_P1V8_CURRENT,
+  BIC_GPV3_VR_P1V8_TEMP,
+
+  //E1S
+  BIC_GPV3_E1S_1_12V_POWER,
+  BIC_GPV3_E1S_1_12V_VOLTAGE,
+  BIC_GPV3_E1S_1_12V_CURRENT,
+  BIC_GPV3_E1S_1_TEMP,
+  BIC_GPV3_E1S_2_12V_POWER,
+  BIC_GPV3_E1S_2_12V_VOLTAGE,
+  BIC_GPV3_E1S_2_12V_CURRENT,
+  BIC_GPV3_E1S_2_TEMP,
+
+  //M.2 devices
+  BIC_GPV3_INA233_PWR_DEV0,
+  BIC_GPV3_INA233_VOL_DEV0,
+  BIC_GPV3_NVME_TEMP_DEV0,
+
+  BIC_GPV3_INA233_PWR_DEV1,
+  BIC_GPV3_INA233_VOL_DEV1,
+  BIC_GPV3_NVME_TEMP_DEV1,
+
+  BIC_GPV3_INA233_PWR_DEV2,
+  BIC_GPV3_INA233_VOL_DEV2,
+  BIC_GPV3_NVME_TEMP_DEV2,
+
+  BIC_GPV3_INA233_PWR_DEV3,
+  BIC_GPV3_INA233_VOL_DEV3,
+  BIC_GPV3_NVME_TEMP_DEV3,
+
+  BIC_GPV3_INA233_PWR_DEV4,
+  BIC_GPV3_INA233_VOL_DEV4,
+  BIC_GPV3_NVME_TEMP_DEV4,
+
+  BIC_GPV3_INA233_PWR_DEV5,
+  BIC_GPV3_INA233_VOL_DEV5,
+  BIC_GPV3_NVME_TEMP_DEV5,
+
+  BIC_GPV3_INA233_PWR_DEV6,
+  BIC_GPV3_INA233_VOL_DEV6,
+  BIC_GPV3_NVME_TEMP_DEV6,
+
+  BIC_GPV3_INA233_PWR_DEV7,
+  BIC_GPV3_INA233_VOL_DEV7,
+  BIC_GPV3_NVME_TEMP_DEV7,
+
+  BIC_GPV3_INA233_PWR_DEV8,
+  BIC_GPV3_INA233_VOL_DEV8,
+  BIC_GPV3_NVME_TEMP_DEV8,
+
+  BIC_GPV3_INA233_PWR_DEV9,
+  BIC_GPV3_INA233_VOL_DEV9,
+  BIC_GPV3_NVME_TEMP_DEV9,
+
+  BIC_GPV3_INA233_PWR_DEV10,
+  BIC_GPV3_INA233_VOL_DEV10,
+  BIC_GPV3_NVME_TEMP_DEV10,
+
+  BIC_GPV3_INA233_PWR_DEV11,
+  BIC_GPV3_INA233_VOL_DEV11,
+  BIC_GPV3_NVME_TEMP_DEV11,
+};
+
 const uint8_t bic_1ou_edsff_skip_sensor_list[] = {
   BIC_1OU_EDSFF_SENSOR_NUM_V_HSC_IN,
   BIC_1OU_EDSFF_SENSOR_NUM_I_HSC_OUT,
@@ -436,7 +611,7 @@ PAL_ATTR_INFO adm1278_info_list[] = {
   {HSC_TEMP, 42, 31880, 10},
 };
 
-//{SensorName, ID, FUNCTION, PWR_STATUS, {UCR, UNR, UNC, LCR, LNR, LNC, Pos, Neg}
+//{SensorName, ID, FUNCTION, PWR_STATUS, {UCR, UNC, UNR, LCR, LNR, LNC, Pos, Neg}
 PAL_SENSOR_MAP sensor_map[] = {
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0}, //0x00
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0}, //0x01
@@ -656,7 +831,7 @@ PAL_SENSOR_MAP sensor_map[] = {
   {"BMC_SENSOR_HSC_EIN", HSC_ID0, read_hsc_ein, true, {362, 0, 0, 0, 0, 0, 0, 0}, POWER}, //0xCB
   {"BMC_SENSOR_PDB_DL_VDELTA", 0xCC, read_pdb_dl_vdelta, true, {0.9, 0, 0, 0, 0, 0, 0, 0}, VOLT}, //0xCC
   {"BMC_SENSOR_CURR_LEAKAGE", 0xCD, read_curr_leakage, true, {0, 0, 0, 0, 0, 0, 0, 0}, PERCENT}, //0xCD
-  {"BMC_SENSOR_PDB_BB_VDELTA", 0xCE, read_cached_val, true, {0, 0, 0, 0, 0, 0, 0, 0}, VOLT}, //0xCE
+  {"BMC_SENSOR_PDB_BB_VDELTA", 0xCE, read_cached_val, true, {0.8, 0, 0, 0, 0, 0, 0, 0}, VOLT}, //0xCE
   {"BMC_SENSOR_MEDUSA_VDELTA", 0xCF, read_medusa_val, true, {0.5, 0, 0, 0, 0, 0, 0, 0}, VOLT}, //0xCF
   {"BMC_SENSOR_MEDUSA_CURR", 0xD0, read_medusa_val, 0, {144, 0, 0, 0, 0, 0, 0, 0}, CURR}, //0xD0
   {"BMC_SENSOR_MEDUSA_PWR", 0xD1, read_medusa_val, 0, {1800, 0, 0, 0, 0, 0, 0, 0}, POWER}, //0xD1
@@ -690,7 +865,7 @@ PAL_SENSOR_MAP sensor_map[] = {
   {NULL, 0, NULL, 0, {0, 0, 0, 0, 0, 0, 0, 0}, 0}, //0xEC
   {"BMC_INLET_TEMP",  TEMP_INLET,  read_temp, true, {50, 0, 0, 0, 0, 0, 0, 0}, TEMP}, //0xED
   {"BMC_OUTLET_TEMP", TEMP_OUTLET, read_temp, true, {55, 0, 0, 0, 0, 0, 0, 0}, TEMP}, //0xEE
-  {"NIC_SENSOR_TEMP", TEMP_NIC, read_temp, true, {95, 85, 105, 0, 0, 0, 0, 0}, TEMP}, //0xEF
+  {"NIC_SENSOR_TEMP", TEMP_NIC, read_temp, true, {105, 0, 120, 0, 0, 0, 0, 0}, TEMP}, //0xEF
   {"BMC_SENSOR_P5V", ADC0, read_adc_val, true, {5.486, 0, 0, 4.524, 0, 0, 0, 0}, VOLT}, //0xF0
   {"BMC_SENSOR_P12V", ADC1, read_adc_val, true, {13.23, 0, 0, 11.277, 0, 0, 0, 0}, VOLT}, //0xF1
   {"BMC_SENSOR_P3V3_STBY", ADC2, read_adc_val, true, {3.629, 0, 0, 2.976, 0, 0, 0, 0}, VOLT}, //0xF2
@@ -722,16 +897,22 @@ size_t bic_1ou_sensor_cnt = sizeof(bic_1ou_sensor_list)/sizeof(uint8_t);
 size_t bic_2ou_sensor_cnt = sizeof(bic_2ou_sensor_list)/sizeof(uint8_t);
 size_t bic_bb_sensor_cnt = sizeof(bic_bb_sensor_list)/sizeof(uint8_t);
 size_t bic_1ou_edsff_sensor_cnt = sizeof(bic_1ou_edsff_sensor_list)/sizeof(uint8_t);
+size_t bic_2ou_gpv3_sensor_cnt = sizeof(bic_2ou_gpv3_sensor_list)/sizeof(uint8_t);
 size_t bic_spe_sensor_cnt = sizeof(bic_spe_sensor_list)/sizeof(uint8_t);
 size_t bic_skip_sensor_cnt = sizeof(bic_skip_sensor_list)/sizeof(uint8_t);
 size_t bic_1ou_skip_sensor_cnt = sizeof(bic_1ou_skip_sensor_list)/sizeof(uint8_t);
 size_t bic_2ou_skip_sensor_cnt = sizeof(bic_2ou_skip_sensor_list)/sizeof(uint8_t);
+size_t bic_2ou_gpv3_skip_sensor_cnt = sizeof(bic_2ou_gpv3_skip_sensor_list)/sizeof(uint8_t);
 size_t bic_1ou_edsff_skip_sensor_cnt = sizeof(bic_1ou_edsff_skip_sensor_list)/sizeof(uint8_t);
 
+static int compare(const void *arg1, const void *arg2) {
+  return(*(int *)arg2 - *(int *)arg1);
+}
 
 int
 get_skip_sensor_list(uint8_t fru, uint8_t **skip_sensor_list, int *cnt, const uint8_t bmc_location, const uint8_t config_status) {
   uint8_t type = 0;
+  uint8_t type_2ou = UNKNOWN_BOARD;
   static uint8_t current_cnt = 0;
 
   if (bic_dynamic_skip_sensor_list[fru-1][0] == 0) {
@@ -744,6 +925,10 @@ get_skip_sensor_list(uint8_t fru, uint8_t **skip_sensor_list, int *cnt, const ui
       bic_get_1ou_type(fru, &type);
     }
 
+    if ((config_status & PRESENT_2OU) == PRESENT_2OU ) {
+      fby3_common_get_2ou_board_type(FRU_SLOT1, &type_2ou);
+    }
+
     if (type == EDSFF_1U) {
       memcpy(&bic_dynamic_skip_sensor_list[fru-1][current_cnt], bic_1ou_edsff_skip_sensor_list, bic_1ou_edsff_skip_sensor_cnt);
       current_cnt += bic_1ou_edsff_skip_sensor_cnt;
@@ -752,8 +937,13 @@ get_skip_sensor_list(uint8_t fru, uint8_t **skip_sensor_list, int *cnt, const ui
       current_cnt += bic_1ou_skip_sensor_cnt;
     }
 
-    memcpy(&bic_dynamic_skip_sensor_list[fru-1][current_cnt], bic_2ou_skip_sensor_list, bic_2ou_skip_sensor_cnt);
-    current_cnt += bic_2ou_skip_sensor_cnt;
+    if ( type_2ou == GPV3_MCHP_BOARD || type_2ou == GPV3_BRCM_BOARD ) {
+      memcpy(&bic_dynamic_skip_sensor_list[fru-1][current_cnt], bic_2ou_gpv3_skip_sensor_list, bic_2ou_gpv3_skip_sensor_cnt);
+      current_cnt += bic_2ou_gpv3_skip_sensor_cnt;
+    } else {
+      memcpy(&bic_dynamic_skip_sensor_list[fru-1][current_cnt], bic_2ou_skip_sensor_list, bic_2ou_skip_sensor_cnt);
+      current_cnt += bic_2ou_skip_sensor_cnt;
+    }
   }
 
   *skip_sensor_list = (uint8_t *) bic_dynamic_skip_sensor_list[fru-1];
@@ -765,8 +955,8 @@ get_skip_sensor_list(uint8_t fru, uint8_t **skip_sensor_list, int *cnt, const ui
 int
 pal_get_fru_sensor_list(uint8_t fru, uint8_t **sensor_list, int *cnt) {
   uint8_t bmc_location = 0, type = 0;
-  int ret = 0;
-  uint8_t config_status = 0, board_type = 0;
+  int ret = 0, config_status = 0;
+  uint8_t board_type = 0;
   uint8_t current_cnt = 0;
 
   ret = fby3_common_get_bmc_location(&bmc_location);
@@ -796,6 +986,7 @@ pal_get_fru_sensor_list(uint8_t fru, uint8_t **sensor_list, int *cnt) {
     memcpy(bic_dynamic_sensor_list[fru-1], bic_sensor_list, bic_sensor_cnt);
     current_cnt = bic_sensor_cnt;
     config_status = (pal_is_fw_update_ongoing(fru) == false) ? bic_is_m2_exp_prsnt(fru):bic_is_m2_exp_prsnt_cache(fru);
+    if (config_status < 0) config_status = 0;
 
     // 1OU
     if ( (bmc_location == BB_BMC || bmc_location == DVT_BB_BMC) && ((config_status & PRESENT_1OU) == PRESENT_1OU) ) {
@@ -818,6 +1009,11 @@ pal_get_fru_sensor_list(uint8_t fru, uint8_t **sensor_list, int *cnt) {
       if (board_type == E1S_BOARD) { // Sierra point expansion
         memcpy(&bic_dynamic_sensor_list[fru-1][current_cnt], bic_spe_sensor_list, bic_spe_sensor_cnt);
         current_cnt += bic_spe_sensor_cnt;
+      } else if (board_type == GPV3_MCHP_BOARD || board_type == GPV3_BRCM_BOARD){
+        memcpy(&bic_dynamic_sensor_list[fru-1][current_cnt], bic_2ou_gpv3_sensor_list, bic_2ou_gpv3_sensor_cnt);
+        current_cnt += bic_2ou_gpv3_sensor_cnt;
+      } else if (board_type == DP_RISER_BOARD) {
+        current_cnt += 0;
       } else {
         memcpy(&bic_dynamic_sensor_list[fru-1][current_cnt], bic_2ou_sensor_list, bic_2ou_sensor_cnt);
         current_cnt += bic_2ou_sensor_cnt;
@@ -975,8 +1171,8 @@ int pal_set_fan_speed(uint8_t fan, uint8_t pwm)
 int pal_get_fan_speed(uint8_t fan, int *rpm)
 {
   char label[32] = {0};
-  float value;
-  int ret;
+  float value = 0;
+  int ret = PAL_ENOTSUP;
   uint8_t bmc_location = 0;
   uint8_t fan_type = UNKNOWN_TYPE;
 
@@ -1001,11 +1197,12 @@ int pal_get_fan_speed(uint8_t fan, int *rpm)
       return -1;
     }
     ret = sensors_read_fan(label, &value);
-  } else if (bmc_location == NIC_BMC) {
-    ret = bic_get_fan_speed(fan, &value);
+  } else if ( bmc_location == NIC_BMC ) {
+    if ( pal_is_fw_update_ongoing(FRU_SLOT1) == true ) return PAL_ENOTSUP;
+    else ret = bic_get_fan_speed(fan, &value);
   }
 
-  if (ret == 0) {
+  if (ret == PAL_EOK) {
     *rpm = (int)value;
   }
 
@@ -1027,7 +1224,8 @@ int pal_get_fan_name(uint8_t num, char *name)
 static int
 _pal_get_pwm_value(uint8_t pwm, float *value, uint8_t bmc_location) {
   if ( bmc_location == NIC_BMC ) {
-    return bic_get_fan_pwm(pwm, value);
+    if ( pal_is_fw_update_ongoing(FRU_SLOT1) == true ) return PAL_ENOTSUP;
+    else return bic_get_fan_pwm(pwm, value);
   }
 
   char label[32] = {0};
@@ -1428,7 +1626,10 @@ read_adc_val(uint8_t adc_id, float *value) {
   int i = 0;
   int available_sampling = 0;
   float temp_val = 0;
-  const int sampling = 100;
+  uint8_t fan_type = UNKNOWN_TYPE;
+  uint8_t bmc_location = 0;
+  float arr[120] = {0};
+  int ignore_sample = 0;
   const char *adc_label[] = {
     "BMC_SENSOR_P5V",
     "BMC_SENSOR_P12V",
@@ -1443,6 +1644,16 @@ read_adc_val(uint8_t adc_id, float *value) {
     "BMC_SENSOR_NIC_P12V",
   };
 
+  ret = pal_get_fan_type(&bmc_location, &fan_type);
+  //Config A and B use a single type of fan.
+  //Config D uses a dual type of fan.
+  if ( fan_type == SINGLE_TYPE) {
+    ignore_sample = 20;
+  } else {
+    ignore_sample = 0;
+  }
+  int sampling = 100 + ignore_sample;
+
   if (adc_id >= ARRAY_SIZE(adc_label)) {
     return -1;
   }
@@ -1454,7 +1665,7 @@ read_adc_val(uint8_t adc_id, float *value) {
       if ( ret < 0 ) {
         syslog(LOG_WARNING,"%s() Failed to get val. i=%d", __func__, i);
       } else {
-        *value += temp_val;
+        arr[i] = temp_val;
         available_sampling++;
       }
     }
@@ -1462,7 +1673,14 @@ read_adc_val(uint8_t adc_id, float *value) {
     if ( available_sampling == 0 ) {
       ret = READING_NA;
     } else {
-      *value = *value / available_sampling;
+      if (fan_type == SINGLE_TYPE) {
+        qsort((void *)arr, sampling, sizeof(int), compare);
+      }
+      // Drop the last 20 lower value
+      for(i = 0; i < (sampling - ignore_sample); i++) {
+        *value += arr[i];
+      }
+      *value = *value / (available_sampling - ignore_sample);
     }
   } else {
     ret = sensors_read_adc(adc_label[adc_id], value);
@@ -1471,7 +1689,7 @@ read_adc_val(uint8_t adc_id, float *value) {
   //TODO: if devices are not installed, maybe we need to show NA instead of 0.01
   if ( ret == PAL_EOK ) {
     if ( ADC8 == adc_id ) {
-      *value = *value/0.22/0.237; // EVT: /0.22/0.237/4
+      *value = *value/0.22/0.665; // EVT: /0.22/0.237/4
       //when pwm is kept low, the current is very small or close to 0
       //BMC will show 0.00 amps. make it show 0.01 at least.
       if ( *value < 0.01 ) *value = 0.01;
@@ -1626,15 +1844,14 @@ read_hsc_peak_pin(uint8_t hsc_id, float *value) {
 }
 
 static void
-pal_all_slot_power_ctrl(uint8_t opt, float *val) {
+pal_all_slot_power_ctrl(uint8_t opt, char *sel_desc) {
   int i = 0;
   uint8_t status = 0;
   for ( i = FRU_SLOT1; i <= FRU_SLOT4; i++ ) {
     if ( pal_is_fru_prsnt(i, &status) < 0 || status == 0 ) {
       continue;
     }
-    syslog(LOG_CRIT, "FRU: %d, Turned %s 12V power of slot%d due to NIC temp is %s UNR. (val = %.2f)", i, (opt == SERVER_12V_ON)?"on":"off" \
-                                                                                                     , i, (opt == SERVER_12V_ON)?"under":"over", *val);
+    syslog(LOG_CRIT, "FRU: %d, Turned %s 12V power of slot%d due to %s", i, (opt == SERVER_12V_ON)?"on":"off", i, sel_desc);
     if ( pal_set_server_power(i, opt) < 0 ) {
       syslog(LOG_CRIT, "Failed to turn %s 12V power of slot%d", (opt == SERVER_12V_ON)?"on":"off", i);
     }
@@ -1642,10 +1859,11 @@ pal_all_slot_power_ctrl(uint8_t opt, float *val) {
 }
 
 static void
-pal_nic_otp_check(float *value, float unr) {
+pal_nic_otp_check(float *value, float unr, float ucr) {
   static int retry = MAX_RETRY;
   static bool is_otp_asserted = false;
-  if ( *value < unr ) {
+  char sel_str[128] = {0};
+  if ( *value < ucr ) {
     if ( is_otp_asserted == false ) return; //it will move on when is_otp_asserted is true
     if ( retry != MAX_RETRY ) {
       retry++;
@@ -1654,7 +1872,8 @@ pal_nic_otp_check(float *value, float unr) {
 
     //recover the system
     is_otp_asserted = false;
-    pal_all_slot_power_ctrl(SERVER_12V_ON, value);
+    snprintf(sel_str, sizeof(sel_str), "NIC temp is under UCR. (val = %.2f)", *value);
+    pal_all_slot_power_ctrl(SERVER_12V_ON, sel_str);
     return;
   }
 
@@ -1664,9 +1883,31 @@ pal_nic_otp_check(float *value, float unr) {
   }
 
   //need to turn off all slots since retry is reached
-  if ( is_otp_asserted == false ) {
+  if ( is_otp_asserted == false && *value >= unr ) {
     is_otp_asserted = true;
-    pal_all_slot_power_ctrl(SERVER_12V_OFF, value);
+    snprintf(sel_str, sizeof(sel_str), "NIC temp is over UNR. (val = %.2f)", *value);
+    pal_all_slot_power_ctrl(SERVER_12V_OFF, sel_str);
+  }
+
+  return;
+}
+
+void
+pal_fan_fail_otp_check(void) {
+  uint8_t bmc_location = 0;
+  char sel_str[128] = {0};
+  static bool is_fan_fail_otp_asserted = false;
+
+  if (is_fan_fail_otp_asserted == true) return;
+
+  if ( fby3_common_get_bmc_location(&bmc_location) < 0 ) {
+    syslog(LOG_WARNING, "Failed to get the location of BMC");
+  }
+
+  if ( is_fan_fail_otp_asserted == false && bmc_location != NIC_BMC){
+    is_fan_fail_otp_asserted = true;
+    snprintf(sel_str, sizeof(sel_str), "all fans failed");
+    pal_all_slot_power_ctrl(SERVER_12V_OFF, sel_str);
   }
 
   return;
@@ -1700,7 +1941,6 @@ skip_bic_sensor_list(uint8_t fru, uint8_t sensor_num, const uint8_t bmc_location
 static int
 pal_bic_sensor_read_raw(uint8_t fru, uint8_t sensor_num, float *value, uint8_t bmc_location, const uint8_t config_status){
 #define BIC_SENSOR_READ_NA 0x20
-#define SLOT_SENSOR_LOCK "/var/run/slot%d_sensor.lock"
   int ret = 0;
   uint8_t power_status = 0;
   ipmi_sensor_reading_t sensor = {0};
@@ -1745,8 +1985,10 @@ pal_bic_sensor_read_raw(uint8_t fru, uint8_t sensor_num, float *value, uint8_t b
   } else if ( (sensor_num >= 0x50 && sensor_num <= 0x7F) && (bmc_location != NIC_BMC) && //1OU
        ((config_status & PRESENT_1OU) == PRESENT_1OU) ) {
     ret = bic_get_sensor_reading(fru, sensor_num, &sensor, FEXP_BIC_INTF);
-  } else if ( (sensor_num >= 0x80 && sensor_num <= 0xCA) && //2OU
-       ((config_status & PRESENT_2OU) == PRESENT_2OU) ) {
+  } else if ( ((sensor_num >= 0x80 && sensor_num <= 0xCE) ||     //2OU
+               (sensor_num >= 0x49 && sensor_num <= 0x4D)) &&    //Many sensors are defined in GPv3.
+              ((config_status & PRESENT_2OU) == PRESENT_2OU) ) { //The range from 0x80 to 0xCE is not enough for adding new sensors.
+                                                                 //So, we take 0x49 ~ 0x4D here
     ret = bic_get_sensor_reading(fru, sensor_num, &sensor, REXP_BIC_INTF);
   } else if ( (sensor_num >= 0xD1 && sensor_num <= 0xEC) ) { //BB
     ret = bic_get_sensor_reading(fru, sensor_num, &sensor, BB_BIC_INTF);
@@ -1879,7 +2121,8 @@ pal_sensor_read_raw(uint8_t fru, uint8_t sensor_num, void *value) {
       }
 
       //if we can't get the config status of the blade, return READING_NA.
-      if ( config_status[fru-1] != CONFIG_UNKNOWN ) {
+      if ( pal_is_fw_update_ongoing(fru) == false && \
+           config_status[fru-1] != CONFIG_UNKNOWN ) {
         if ( pal_sdr_init(fru) == ERR_NOT_READY ) ret = READING_NA;
         else ret = pal_bic_sensor_read_raw(fru, sensor_num, (float*)value, bmc_location, config_status[fru-1]);
       } else ret = READING_NA;
@@ -1890,7 +2133,7 @@ pal_sensor_read_raw(uint8_t fru, uint8_t sensor_num, void *value) {
     case FRU_NIC:
       ret = sensor_map[sensor_num].read_sensor(id, (float*) value);
       //Over temperature protection
-      pal_nic_otp_check((float*)value, sensor_map[sensor_num].snr_thresh.unr_thresh);
+      pal_nic_otp_check((float*)value, sensor_map[sensor_num].snr_thresh.unr_thresh, sensor_map[sensor_num].snr_thresh.ucr_thresh);
       break;
 
     default:
@@ -2009,7 +2252,8 @@ pal_sensor_sdr_path(uint8_t fru, char *path) {
 }
 
 static int
-_sdr_init(char *path, sensor_info_t *sinfo) {
+_sdr_init(char *path, sensor_info_t *sinfo, uint8_t bmc_location, \
+          const uint8_t config_status, const uint8_t board_type) {
   int fd;
   int ret = 0;
   uint8_t buf[MAX_SDR_LEN] = {0};
@@ -2017,7 +2261,6 @@ _sdr_init(char *path, sensor_info_t *sinfo) {
   uint8_t snr_num = 0;
   sdr_full_t *sdr;
   int retry = MAX_RETRY;
-  uint8_t bmc_location = 0;
 
   while ( access(path, F_OK) == -1 && retry > 0 ) {
     syslog(LOG_WARNING, "%s() Failed to access %s, wait a second.\n", __func__, path);
@@ -2037,12 +2280,6 @@ _sdr_init(char *path, sensor_info_t *sinfo) {
     goto error_exit;
   }
 
-  ret = fby3_common_get_bmc_location(&bmc_location);
-  if (ret < 0) {
-    syslog(LOG_ERR, "%s() Cannot get the location of BMC", __func__);
-    goto error_exit;
-  }
-
   while ((bytes_rd = read(fd, buf, sizeof(sdr_full_t))) > 0) {
     if (bytes_rd != sizeof(sdr_full_t)) {
       syslog(LOG_WARNING, "%s() read returns %d bytes\n", __func__, bytes_rd);
@@ -2058,12 +2295,21 @@ _sdr_init(char *path, sensor_info_t *sinfo) {
         sdr->uc_thresh = HSC_OUTPUT_CUR_UC_THRESHOLD;
         sdr->m_val = 0x04;
       }
-    } else if (snr_num == BIC_SENSOR_HSC_INPUT_PWR){
+    } else if (snr_num == BIC_SENSOR_HSC_INPUT_PWR || snr_num == BIC_SENSOR_HSC_INPUT_AVGPWR){
       if (bmc_location == NIC_BMC) {
         sdr->uc_thresh = HSC_INPUT_PWR_UC_THRESHOLD;
         sdr->m_val = 0x04;
       }
+    } else if ( (config_status & PRESENT_2OU) == PRESENT_2OU && (board_type == GPV3_BRCM_BOARD) \
+                                       && (snr_num == BIC_GPV3_VR_P1V8_CURRENT || \
+                                           snr_num == BIC_GPV3_VR_P1V8_POWER) ) {
+      sdr->uc_thresh = 0x00; //NA
+    } else if ( (config_status & PRESENT_2OU) == PRESENT_2OU && (board_type == GPV3_BRCM_BOARD) \
+                                       && (snr_num == BIC_GPV3_VR_P0V84_VOLTAGE) ) {
+      sdr->uc_thresh = 0xB8;
+      sdr->lc_thresh = 0xB0;
     }
+
     memcpy(&sinfo[snr_num].sdr, sdr, sizeof(sdr_full_t));
     //syslog(LOG_WARNING, "%s() copy num: 0x%x:%s success", __func__, snr_num, sdr->str);
   }
@@ -2092,12 +2338,22 @@ int
 pal_sensor_sdr_init(uint8_t fru, sensor_info_t *sinfo) {
   char path[64] = {0};
   int retry = MAX_RETRY;
-  int ret = 0;
+  int ret = 0, prsnt_retry = 1;
+  uint8_t bmc_location = 0;
+  uint8_t config_status = 0;
+  uint8_t board_type = 0;
 
   //syslog(LOG_WARNING, "%s() pal_is_sdr_init  bool %d, fru %d, snr_num: %x\n", __func__, pal_is_sdr_init(fru), fru, g_sinfo[fru-1][1].sdr.sensor_num);
   if ( true == pal_is_sdr_init(fru) ) {
     memcpy(sinfo, g_sinfo[fru-1], sizeof(sensor_info_t) * MAX_SENSOR_NUM);
     goto error_exit;
+  }
+
+  sprintf(path, PWR_UTL_LOCK, fru);
+  if (access(path, F_OK) == 0) {
+    prsnt_retry = MAX_READ_RETRY;
+  } else {
+    prsnt_retry = 1;
   }
 
   ret = pal_sensor_sdr_path(fru, path);
@@ -2106,8 +2362,34 @@ pal_sensor_sdr_init(uint8_t fru, sensor_info_t *sinfo) {
     goto error_exit;
   }
 
+  // get the location
+  ret = fby3_common_get_bmc_location(&bmc_location);
+  if (ret < 0) {
+    syslog(LOG_ERR, "%s() Cannot get the location of BMC", __func__);
+    goto error_exit;
+  }
+
+  while ( prsnt_retry-- > 0 ) {
+    // get the status of m2 board
+    ret = bic_is_m2_exp_prsnt(fru);
+    if ( ret < 0 ) {
+      sleep(3);
+      continue;
+    } else config_status = (uint8_t) ret;
+
+    if ( (config_status & PRESENT_2OU) == PRESENT_2OU ) {
+      //if it's present, get its type
+      fby3_common_get_2ou_board_type(fru, &board_type);
+    }
+    break;
+  }
+  if ( ret < 0 ) {
+    syslog(LOG_ERR, "%s() Couldn't get the status of 1OU/2OU\n", __func__);
+    goto error_exit;
+  }
+
   while ( retry-- > 0 ) {
-    ret = _sdr_init(path, sinfo);
+    ret = _sdr_init(path, sinfo, bmc_location, config_status, board_type);
     if ( ret < 0 ) {
       syslog(LOG_WARNING, "%s() Failed to run _sdr_init, retry..%d\n", __func__, retry);
       sleep(1);
@@ -2170,6 +2452,41 @@ pal_get_sensor_units(uint8_t fru, uint8_t sensor_num, char *units) {
     default:
       syslog(LOG_WARNING, "%s() unknown sensor number %x", __func__, sensor_num);
     break;
+  }
+  return 0;
+}
+
+int
+pal_is_sensor_valid(uint8_t fru, uint8_t snr_num) {
+  struct {
+    const char *vendor_id;
+    const char *device_id;
+  } drives[] = { // Unsupported sensor reading drives
+    {"1344",  "5410"}, // Micron
+    {"15B7",  "5002"}, // WD
+    {"1179", "011a"}, // Toshiba
+  };
+  char key[100] = {0};
+  char drive_id[16] = {0};
+  char read_vid[16] = {0};
+  char read_did[16] = {0};
+  int i = 0;
+
+  if (snr_num == BIC_SENSOR_M2B_TEMP) {
+    snprintf(key, sizeof(key), DEVICE_KEY, fru);
+    if (kv_get(key, drive_id, NULL, KV_FPERSIST) < 0) {
+      syslog(LOG_WARNING, "%s() Failed to read %s", __func__, key);
+      return 0;
+    }
+
+    snprintf(read_vid, sizeof(read_vid), "%02x%02x", drive_id[1], drive_id[0]);
+    snprintf(read_did, sizeof(read_did), "%02x%02x", drive_id[3], drive_id[2]);
+    for (i = 0; i < ARRAY_SIZE(drives) ; i++) {
+      if (0 == strcmp(read_vid,drives[i].vendor_id) && 0 == strcmp(read_did,drives[i].device_id)) {
+        return 1; // The Drive unsupport sensor reading
+      }
+    }
+    return 0;
   }
   return 0;
 }

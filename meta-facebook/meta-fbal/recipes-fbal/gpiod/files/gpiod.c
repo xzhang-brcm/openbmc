@@ -31,6 +31,7 @@
 #include <openbmc/pal.h>
 #include <openbmc/nm.h>
 #include <openbmc/kv.h>
+#include <openbmc/obmc-i2c.h>
 
 #define POLL_TIMEOUT -1
 #define POWER_ON_STR        "on"
@@ -61,8 +62,8 @@ static long int g_reset_sec = 0;
 static long int g_power_on_sec = 0;
 static pthread_mutex_t timer_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t caterr_mutex = PTHREAD_MUTEX_INITIALIZER;
-static gpio_value_t server_power_status;
-
+static gpio_value_t g_server_power_status;
+static bool g_cpu_pwrgd_trig = false;
 
 // For monitoring GPIOs on IO expender
 struct gpioexppoll_config {
@@ -76,6 +77,13 @@ struct gpioexppoll_config {
   void (*handler)(char* shadow, char* desc, gpio_value_t value);
 };
 
+// For thermaltrip config
+struct cpld_register_config {
+  char shadow[32];
+  uint8_t addr;
+  uint8_t offset;
+};
+
 enum {
   STBY,
   PS_ON,
@@ -84,7 +92,7 @@ enum {
 
 void cpu_vr_hot_init(char* shadow, char* desc, gpio_value_t value) {
   if(value == GPIO_VALUE_LOW ) {
-    syslog(LOG_CRIT, "%s: %s - %s\n", value ? "DEASSERT": "ASSERT", desc, shadow);
+    syslog(LOG_CRIT, "FRU: %d %s: %s - %s\n", FRU_MB, value ? "DEASSERT": "ASSERT", desc, shadow);
   }
   return;
 }
@@ -101,23 +109,96 @@ void cpu_skt_init(char* shadow, char* desc, gpio_value_t value) {
   snprintf(kvalue, sizeof(kvalue), "%d", value);
   kv_set(key, kvalue, 0, KV_FPERSIST);
   if(value != prev_value ) {
-    syslog(LOG_CRIT, "%s: %s - %s\n", value ? "DEASSERT": "ASSERT", desc, shadow);
+    syslog(LOG_CRIT, "FRU: %d %s: %s - %s\n", FRU_MB, value ? "DEASSERT": "ASSERT", desc, shadow);
   }
 }
 
 void ioex_gpios_event_handle(char* shadow, char* desc, gpio_value_t value) {
-  syslog(LOG_CRIT, "%s: %s - %s\n", value ? "DEASSERT": "ASSERT", desc, shadow);
+  syslog(LOG_CRIT, "FRU: %d %s: %s - %s\n", FRU_MB, value ? "DEASSERT": "ASSERT", desc, shadow);
   return;
+}
+
+static
+void cpu0_pvqq_abc_handler(char* shadow, char* desc, gpio_value_t value) {
+  syslog(LOG_CRIT, "FRU: %d CPU0 PVDDQ ABC VR HOT Warning %s\n", FRU_MB,
+         value ? "Deassertion": "Assertion");
+}
+
+static
+void cpu0_pvqq_def_handler(char* shadow, char* desc, gpio_value_t value) {
+  syslog(LOG_CRIT, "FRU: %d CPU0 PVDDQ DEF VR HOT Warning %s\n", FRU_MB,
+         value ? "Deassertion": "Assertion");
+}
+
+static
+void cpu1_pvqq_abc_handler(char* shadow, char* desc, gpio_value_t value) {
+  syslog(LOG_CRIT, "FRU: %d CPU1 PVDDQ ABC VR HOT Warning %s\n", FRU_MB,
+         value ? "Deassertion": "Assertion");
+}
+
+static
+void cpu1_pvqq_def_handler(char* shadow, char* desc, gpio_value_t value) {
+  syslog(LOG_CRIT, "FRU: %d CPU1 PVDDQ DEF VR HOT Warning %s\n", FRU_MB,
+         value ? "Deassertion": "Assertion");
+}
+
+static
+void cpu0_pvccin_vr_hot_handler(char* shadow, char* desc, gpio_value_t value) {
+  syslog(LOG_CRIT, "FRU: %d CPU0 PVCCIN VR HOT Warning %s\n", FRU_MB,
+         value ? "Deassertion": "Assertion");
+}
+
+static
+void cpu1_pvccin_vr_hot_handler(char* shadow, char* desc, gpio_value_t value) {
+  syslog(LOG_CRIT, "FRU: %d CPU1 PVCCIN VR HOT Warning %s\n", FRU_MB,
+         value ? "Deassertion": "Assertion");
+}
+
+static
+void cpu0_pvccin_pwr_in_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr) {
+  syslog(LOG_CRIT, "FRU: %d CPU0 PVCCIN POWER FAULT %s\n", FRU_MB,
+         curr ? "Deassertion": "Assertion");
+}
+
+static
+void cpu1_pvccin_pwr_in_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr) {
+  syslog(LOG_CRIT, "FRU: %d CPU1 PVCCIN POWER FAULT %s\n", FRU_MB,
+         curr ? "Deassertion": "Assertion");
+}
+
+
+static 
+void sml1_pmbus_alert_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr) {
+  syslog(LOG_CRIT, "FRU: %d HSC OC Warning %s\n", FRU_MB,
+         curr ? "Deassertion": "Assertion");
+}
+
+static 
+void oc_detect_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr) {
+  syslog(LOG_CRIT, "FRU: %d HSC Surge Current Warning %s\n", FRU_MB,
+         curr ? "Deassertion": "Assertion");
+}
+
+static 
+void uv_detect_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr) {
+  syslog(LOG_CRIT, "FRU: %d HSC Under Voltage Warning %s\n", FRU_MB,
+         curr ? "Deassertion": "Assertion");
+}
+
+static 
+void hsc_timer_exp_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr) {
+  syslog(LOG_CRIT, "FRU: %d HSC OCP Fault Warning %s\n", FRU_MB,
+         curr ? "Deassertion": "Assertion");
 }
 
 //PCA9539 Address 0XEE
 struct gpioexppoll_config ioex0_gpios[] = {
-  {"IRQ_PVCCIN_CPU0_VRHOT_LVC3_N", "ExIO_0", PS_ON, GPIO_EDGE_BOTH, GPIO_VALUE_INVALID, GPIO_VALUE_INVALID, cpu_vr_hot_init, ioex_gpios_event_handle},
-  {"IRQ_PVCCIN_CPU1_VRHOT_LVC3_N", "ExIO_1", PS_ON, GPIO_EDGE_BOTH, GPIO_VALUE_INVALID, GPIO_VALUE_INVALID, cpu_vr_hot_init, ioex_gpios_event_handle},
-  {"IRQ_PVDDQ_ABC_CPU0_VRHOT_LVC3_N", "ExIO_2", PS_ON, GPIO_EDGE_BOTH, GPIO_VALUE_INVALID, GPIO_VALUE_INVALID, cpu_vr_hot_init, ioex_gpios_event_handle},
-  {"IRQ_PVDDQ_DEF_CPU0_VRHOT_LVC3_N", "ExIO_3", PS_ON, GPIO_EDGE_BOTH, GPIO_VALUE_INVALID, GPIO_VALUE_INVALID, cpu_vr_hot_init, ioex_gpios_event_handle},
-  {"IRQ_PVDDQ_ABC_CPU1_VRHOT_LVC3_N", "ExIO_4", PS_ON, GPIO_EDGE_BOTH, GPIO_VALUE_INVALID, GPIO_VALUE_INVALID, cpu_vr_hot_init, ioex_gpios_event_handle},
-  {"IRQ_PVDDQ_DEF_CPU1_VRHOT_LVC3_N", "ExIO_5", PS_ON, GPIO_EDGE_BOTH, GPIO_VALUE_INVALID, GPIO_VALUE_INVALID, cpu_vr_hot_init, ioex_gpios_event_handle},
+  {"IRQ_PVCCIN_CPU0_VRHOT_LVC3_N", "ExIO_0", PS_ON, GPIO_EDGE_BOTH, GPIO_VALUE_INVALID, GPIO_VALUE_INVALID, cpu_vr_hot_init, cpu0_pvccin_vr_hot_handler},
+  {"IRQ_PVCCIN_CPU1_VRHOT_LVC3_N", "ExIO_1", PS_ON, GPIO_EDGE_BOTH, GPIO_VALUE_INVALID, GPIO_VALUE_INVALID, cpu_vr_hot_init, cpu1_pvccin_vr_hot_handler},
+  {"IRQ_PVDDQ_ABC_CPU0_VRHOT_LVC3_N", "ExIO_2", PS_ON, GPIO_EDGE_BOTH, GPIO_VALUE_INVALID, GPIO_VALUE_INVALID, cpu_vr_hot_init, cpu0_pvqq_abc_handler},
+  {"IRQ_PVDDQ_DEF_CPU0_VRHOT_LVC3_N", "ExIO_3", PS_ON, GPIO_EDGE_BOTH, GPIO_VALUE_INVALID, GPIO_VALUE_INVALID, cpu_vr_hot_init, cpu0_pvqq_def_handler},
+  {"IRQ_PVDDQ_ABC_CPU1_VRHOT_LVC3_N", "ExIO_4", PS_ON, GPIO_EDGE_BOTH, GPIO_VALUE_INVALID, GPIO_VALUE_INVALID, cpu_vr_hot_init, cpu1_pvqq_abc_handler},
+  {"IRQ_PVDDQ_DEF_CPU1_VRHOT_LVC3_N", "ExIO_5", PS_ON, GPIO_EDGE_BOTH, GPIO_VALUE_INVALID, GPIO_VALUE_INVALID, cpu_vr_hot_init, cpu1_pvqq_def_handler},
   {"FM_CPU0_SKTOCC_LVT3_PLD_N", "ExIO_6", STBY, GPIO_EDGE_RISING, GPIO_VALUE_INVALID, GPIO_VALUE_INVALID, cpu_skt_init, ioex_gpios_event_handle},
   {"FM_CPU1_SKTOCC_LVT3_PLD_N", "ExIO_7", STBY, GPIO_EDGE_RISING, GPIO_VALUE_INVALID, GPIO_VALUE_INVALID, cpu_skt_init, ioex_gpios_event_handle},
 };
@@ -127,11 +208,11 @@ static gpio_value_t gpio_get(const char *shadow)
   gpio_value_t value = GPIO_VALUE_INVALID;
   gpio_desc_t *desc = gpio_open_by_shadow(shadow);
   if (!desc) {
-    syslog(LOG_CRIT, "Open failed for GPIO: %s\n", shadow);
+    syslog(LOG_CRIT, "FRU: %d Open failed for GPIO: %s\n", FRU_MB, shadow);
     return GPIO_VALUE_INVALID;
   }
   if (gpio_get_value(desc, &value)) {
-    syslog(LOG_CRIT, "Get failed for GPIO: %s\n", shadow);
+    syslog(LOG_CRIT, "FRU: %d Get failed for GPIO: %s\n", FRU_MB, shadow);
     value = GPIO_VALUE_INVALID;
   }
   gpio_close(desc);
@@ -231,7 +312,8 @@ static void
 log_gpio_change(gpiopoll_pin_t *desc, gpio_value_t value, useconds_t log_delay) {
   const struct gpiopoll_config *cfg = gpio_poll_get_config(desc);
   assert(cfg);
-  syslog(LOG_CRIT, "%s: %s - %s\n", value ? "DEASSERT": "ASSERT", cfg->description, cfg->shadow);
+  syslog(LOG_CRIT, "FRU: %d %s: %s - %s\n", FRU_MB, value ? "DEASSERT": "ASSERT", 
+         cfg->description, cfg->shadow);
 }
 
 static void
@@ -312,13 +394,6 @@ static void fivr_fault_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_val
   log_gpio_change(desc, curr, 0);
 }
 
-
-static void irq_uv_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr)
-{
-  log_gpio_change(desc, curr, 20*1000);
-}
-
-
 //PROCHOT Handler
 static void prochot_reason(char *reason)
 {
@@ -342,16 +417,77 @@ static void cpu_prochot_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_va
   strcat(cmd, "CPU FPH");
   if (curr) {
     strcat(cmd, " DEASSERT");
-    syslog(LOG_CRIT, "DEASSERT: %s - %s\n", cfg->description, cfg->shadow);
+    syslog(LOG_CRIT, "FRU: %d DEASSERT: %s - %s\n", FRU_MB, cfg->description, cfg->shadow);
   } else {
     char reason[32] = "";
     strcat(cmd, " by ");
     prochot_reason(reason);
     strcat(cmd, reason);
-    syslog(LOG_CRIT, "ASSERT: %s - %s (reason: %s)\n", cfg->description, cfg->shadow, reason);
+    syslog(LOG_CRIT, "FRU: %d ASSERT: %s - %s (reason: %s)\n",
+           FRU_MB, cfg->description, cfg->shadow, reason);
     strcat(cmd, " ASSERT");
   }
   pal_add_cri_sel(cmd);
+}
+
+static struct cpld_register_config cpld_registers[] = {
+  {"FM_CPU0_THERMTRIP_LVT3_PLD_N", 0x1e, 0x20}, // GPIOA1
+  {"FM_CPU1_THERMTRIP_LVT3_PLD_N", 0x1e, 0x21}, // GPIOD0
+  {"FM_MEM_THERM_EVENT_CPU0_LVT3_N", 0x1e, 0x22}, // GPIOB0
+  {"FM_MEM_THERM_EVENT_CPU1_LVT3_N", 0x1e, 0x23}, // GPIOB1
+  {"FM_CPU_CATERR_LVT3_N", 0x16, 0x10}, // GPIOZ0
+  {"FM_CPU_MSMI_LVT3_N", 0x16, 0x11}, // GPIOZ2
+  {"FM_CPU_ERR0_LVT3_N", 0x16, 0x12}, // GPIOF0
+  {"FM_CPU_ERR1_LVT3_N", 0x16, 0x13}, // GPIOF1
+  {"FM_CPU_ERR2_LVT3_N", 0x16, 0x14}, // GPIOF2
+};
+
+static void get_cpld_register_data (const char *shadow, uint8_t *addr, uint8_t *offset) {
+  int i, config_size = sizeof(cpld_registers) / sizeof(cpld_registers[0]);
+  for (i = 0; i < config_size; i++) {
+    if (strcmp(shadow, cpld_registers[i].shadow) == 0) {
+      *addr = cpld_registers[i].addr;
+      *offset = cpld_registers[i].offset;
+      return;
+    }
+  }
+}
+
+static int cpld_register_check(const char *shadow)
+{
+  int fd = 0, retCode = -1;
+  uint8_t bus = 4;
+  uint8_t addr = 0x00;
+  uint8_t offset = 0x00;
+  uint8_t tlen, rlen;
+  uint8_t tbuf[16] = {0};
+  uint8_t rbuf[16] = {0};
+ 
+  fd = i2c_cdev_slave_open(bus, addr >> 1, I2C_SLAVE_FORCE_CLAIM);
+  if (fd < 0) {
+    syslog(LOG_WARNING, "%s() Failed to open %d", __func__, bus);
+    return retCode;
+  }
+
+  get_cpld_register_data(shadow, &addr, &offset); 
+  if (addr == 0 || offset == 0) {
+    syslog(LOG_WARNING, "There is no cpld register can check with %s\n", shadow);  
+    i2c_cdev_slave_close(fd);
+    return retCode;
+  }
+
+  tbuf[0] = (uint8_t)offset;
+  tlen = 1;
+  rlen = 1;
+
+  retCode = i2c_rdwr_msg_transfer(fd, addr, tbuf, tlen, rbuf, rlen);
+  if (retCode == -1) {
+    syslog(LOG_WARNING, "%s bus=%x slavaddr=%x offset=%x\n", __func__, bus, addr >> 1, offset);
+  } else {
+    retCode = (int)rbuf[0];
+  }
+  i2c_cdev_slave_close(fd);
+  return retCode;
 }
 
 static void thermtrip_add_cri_sel(const char *shadow_name, gpio_value_t curr)
@@ -366,7 +502,7 @@ static void thermtrip_add_cri_sel(const char *shadow_name, gpio_value_t curr)
   if (curr == GPIO_VALUE_HIGH) 
     sprintf(log_descript, "DEASSERT");
 
-  sprintf(cmd, "%s thermtrip %s", log_name, log_descript);
+  sprintf(cmd, "FRU: %d %s thermtrip %s", FRU_MB, log_name, log_descript);
   pal_add_cri_sel(cmd);
 }
 
@@ -374,16 +510,37 @@ static void cpu_thermtrip_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_
 {
   const struct gpiopoll_config *cfg = gpio_poll_get_config(desc);
 
-  if (server_power_status != GPIO_VALUE_HIGH) 
+  if (g_server_power_status != GPIO_VALUE_HIGH) 
     return;
 
+  if (cpld_register_check(cfg->shadow) <= 0)
+    return;
+  
   thermtrip_add_cri_sel(cfg->shadow, curr);
   log_gpio_change(desc, curr, 0);
 }
 
+static void cpu_event_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr)
+{
+  int cpld_register_count = 0;
+  const struct gpiopoll_config *cfg = gpio_poll_get_config(desc);
+
+  if (g_server_power_status != GPIO_VALUE_HIGH) 
+    return;
+
+  cpld_register_count = cpld_register_check(cfg->shadow);
+  if (cpld_register_count == 0)
+    return;
+
+  assert(cfg);
+  syslog(LOG_CRIT, "FRU: %d %s: %s - %s, %d time%s\n",
+  FRU_MB, curr ? "DEASSERT": "ASSERT", cfg->description, cfg->shadow,
+  cpld_register_count, cpld_register_count > 1 ? "s": "");
+}
+
 static void mem_thermtrip_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr)
 {
-  if (server_power_status != GPIO_VALUE_HIGH) 
+  if (g_server_power_status != GPIO_VALUE_HIGH) 
     return;
   log_gpio_change(desc, curr, 0);
 }
@@ -437,17 +594,12 @@ pwr_button_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr) {
   log_gpio_change(desc, curr, 0);
 }
 
-//System Power Ok Event Handler
-static void
-pwr_sysok_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr) {
-  reset_timer(&g_power_on_sec);
-  log_gpio_change(desc, curr, 0);
-}
-
 //CPU Power Ok Event Handler
 static void
 cpu_pwr_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr) {
-  server_power_status = curr;
+  g_server_power_status = curr;
+  g_cpu_pwrgd_trig = true;
+  log_gpio_change(desc, curr, 0);
 }
 
 //IERR and MCERR Event Handler
@@ -470,13 +622,14 @@ init_msmi(gpiopoll_pin_t *desc, gpio_value_t value) {
 }
 
 static void
-init_cpu_pwrok(gpiopoll_pin_t *desc, gpio_value_t value) {
-  server_power_status = (value ? GPIO_VALUE_HIGH : GPIO_VALUE_LOW);
-}
-
-static void
 err_caterr_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr) {
+  const struct gpiopoll_config *cfg = gpio_poll_get_config(desc);
+
   SERVER_POWER_CHECK(1);
+
+  if (cpld_register_check(cfg->shadow) == 0)
+    return;
+
   pthread_mutex_lock(&caterr_mutex);
   g_caterr_irq++;
   pthread_mutex_unlock(&caterr_mutex);
@@ -484,7 +637,13 @@ err_caterr_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr) {
 
 static void
 err_msmi_handler(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr) {
+  const struct gpiopoll_config *cfg = gpio_poll_get_config(desc);
+  
   SERVER_POWER_CHECK(1);
+
+  if (cpld_register_check(cfg->shadow) <= 0)
+    return;
+   
   pthread_mutex_lock(&caterr_mutex);
   g_msmi_irq++;
   pthread_mutex_unlock(&caterr_mutex);
@@ -510,7 +669,7 @@ ierr_mcerr_event_log(bool is_caterr, const char *err_type) {
 
   sprintf(temp_syslog, "ASSERT: CPU%s %s\n", cpu_str, err_type);
   sprintf(temp_log, "CPU%s %s", cpu_str, err_type);
-  syslog(LOG_CRIT, "%s", temp_syslog);
+  syslog(LOG_CRIT, "FRU: %d %s",FRU_MB, temp_syslog);
   pal_add_cri_sel(temp_log);
 
   return ret;
@@ -541,7 +700,7 @@ ierr_mcerr_event_handler() {
           g_mcerr_ierr_assert = true;
 
           if (gpio_get_value(caterr, &value)) {
-            syslog(LOG_CRIT, "Getting CATERR GPIO failed");
+            syslog(LOG_CRIT, "FRU: %d Getting CATERR GPIO failed", FRU_MB);
             break;
           }
 
@@ -578,7 +737,7 @@ ierr_mcerr_event_handler() {
           g_mcerr_ierr_assert = true;
 
           if (gpio_get_value(msmi, &value)) {
-            syslog(LOG_CRIT, "Getting MSMI GPIO failed");
+            syslog(LOG_CRIT, "FRU: %d Getting MSMI GPIO failed", FRU_MB);
             break;
           }
 
@@ -624,8 +783,7 @@ uart_select_handle(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr) {
 }
 
 // Event Handler for GPIOF6 platform reset changes
-static void platform_reset_handle(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr)
-{
+static void platform_reset_handle(gpiopoll_pin_t *desc, gpio_value_t last, gpio_value_t curr) {
   struct timespec ts;
   char value[MAX_VALUE_LEN];
 
@@ -635,17 +793,36 @@ static void platform_reset_handle(gpiopoll_pin_t *desc, gpio_value_t last, gpio_
 
   clock_gettime(CLOCK_MONOTONIC, &ts);
   sprintf(value, "%ld", ts.tv_sec);
-  kv_set("snr_polling_flag", value, 0, 0);
+
+  if( curr == GPIO_VALUE_HIGH )
+    kv_set("snr_pwron_flag", value, 0, 0);
+  else
+    kv_set("snr_pwron_flag", 0, 0, 0);
 
   log_gpio_change(desc, curr, 0);
 }
 
+static void
+platform_reset_init(gpiopoll_pin_t *desc, gpio_value_t value) {
+  struct timespec ts;
+  char data[MAX_VALUE_LEN];
+
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  sprintf(data, "%ld", ts.tv_sec);
+
+  if( value == GPIO_VALUE_HIGH )
+    kv_set("snr_pwron_flag", data, 0, 0);
+  else
+    kv_set("snr_pwron_flag", 0, 0, 0);
+
+  return;
+}
 
 // Thread for gpio timer
 static void
 *gpio_timer() {
   uint8_t status = 0;
-  uint8_t fru = 1;
+  uint8_t fru = FRU_MB;
   long int pot;
   char str[MAX_VALUE_LEN] = {0};
   int tread_time = 0;
@@ -695,28 +872,60 @@ static void
     //Show Uart Debug Select Number 2sec
     if (g_uart_switch_count > 0) {
       if (--g_uart_switch_count == 0)
-        pal_uart_select(AST_GPIO_BASE, UARTSW_OFFSET, UARTSW_BY_DEBUG, 0);
+        pal_postcode_select(POSTCODE_BY_HOST);
     }
   }
 
   return NULL;
 }
 
+// Thread for gpio timer
+static void
+*power_fail_monitor() {
+  static uint8_t init_cache=0;
+  static uint8_t retry=1;
+
+  while (1) {
+    if ( init_cache == 0 ) {
+      if ( g_power_on_sec != 0 ) {
+        g_cpu_pwrgd_trig = true;
+        init_cache = 1;
+      }
+    }
+
+    if ( g_cpu_pwrgd_trig == true ) {
+      sleep(2);
+      while ( pal_check_cpld_power_fail()) {
+        if( retry == 0) {
+          syslog(LOG_CRIT, "Check CPLD Power Fail Falure\n");
+          break;
+        }
+        retry--;
+        sleep(1);
+      }
+      g_cpu_pwrgd_trig = false;
+      retry=1;
+    }
+    sleep(2);
+  }
+  return NULL;
+}
+
+
 // GPIO table to be monitored
 static struct gpiopoll_config g_gpios[] = {
   // shadow, description, edge, handler, oneshot
   {"FP_BMC_RST_BTN_N", "GPIOE0", GPIO_EDGE_BOTH, pwr_reset_handler, NULL},
   {"FM_BMC_PWR_BTN_R_N", "GPIOE2", GPIO_EDGE_BOTH, pwr_button_handler, NULL},
-  {"PWRGD_SYS_PWROK", "GPIOY2", GPIO_EDGE_BOTH, pwr_sysok_handler, NULL},
   {"FM_UARTSW_LSB_N", "GPIOL0", GPIO_EDGE_BOTH, uart_select_handle, NULL},
   {"FM_UARTSW_MSB_N", "GPIOL1", GPIO_EDGE_BOTH, uart_select_handle, NULL},
   {"FM_POST_CARD_PRES_BMC_N", "GPIOQ6", GPIO_EDGE_BOTH, usb_dbg_card_handler, NULL},
   {"FM_PCH_BMC_THERMTRIP_N", "GPIOG2", GPIO_EDGE_BOTH, pch_thermtrip_handler, NULL},
-  {"RST_PLTRST_BMC_N", "GPIOF6", GPIO_EDGE_BOTH, platform_reset_handle, NULL},
-  {"IRQ_UV_DETECT_N", "GPIOM0", GPIO_EDGE_BOTH, irq_uv_handler, NULL},
-  {"IRQ_OC_DETECT_N", "GPIOM1", GPIO_EDGE_BOTH, gpio_event_handler, NULL},
+  {"RST_PLTRST_BMC_N", "GPIOF6", GPIO_EDGE_BOTH, platform_reset_handle, platform_reset_init},
+  {"IRQ_UV_DETECT_N", "GPIOM0", GPIO_EDGE_BOTH, uv_detect_handler, NULL},
+  {"IRQ_OC_DETECT_N", "GPIOM1", GPIO_EDGE_BOTH, oc_detect_handler, NULL},
   {"IRQ_HSC_FAULT_N", "GPIOL2", GPIO_EDGE_BOTH, gpio_event_handler, NULL},
-  {"IRQ_SML1_PMBUS_BMC_ALERT_N", "GPIOAA1", GPIO_EDGE_BOTH, gpio_event_handler, NULL},
+  {"IRQ_SML1_PMBUS_BMC_ALERT_N", "GPIOAA1", GPIO_EDGE_BOTH, sml1_pmbus_alert_handler, NULL},
   {"FM_CPU_CATERR_LVT3_N", "GPIOZ0", GPIO_EDGE_FALLING, err_caterr_handler, init_caterr},
   {"FM_CPU_MSMI_LVT3_N", "GPIOZ2", GPIO_EDGE_FALLING, err_msmi_handler, init_msmi},
   {"FM_CPU0_THERMTRIP_LVT3_PLD_N", "GPIOA1", GPIO_EDGE_FALLING, cpu_thermtrip_handler, NULL},
@@ -725,18 +934,19 @@ static struct gpiopoll_config g_gpios[] = {
   {"FM_CPU1_MEMHOT_OUT_N", "GPIOL3", GPIO_EDGE_BOTH, gpio_event_pson_3s_handler, NULL},
   {"FM_CPU0_FIVR_FAULT_LVT3_PLD", "GPIOB2", GPIO_EDGE_BOTH, fivr_fault_handler, NULL},
   {"FM_CPU1_FIVR_FAULT_LVT3_PLD", "GPIOB3", GPIO_EDGE_BOTH, fivr_fault_handler, NULL},
-  {"FM_CPU_ERR0_LVT3_N", "GPIOF0", GPIO_EDGE_BOTH, gpio_event_pson_handler, NULL},
-  {"FM_CPU_ERR1_LVT3_N", "GPIOF1", GPIO_EDGE_BOTH, gpio_event_pson_handler, NULL},
-  {"FM_CPU_ERR2_LVT3_N", "GPIOF2", GPIO_EDGE_BOTH, gpio_event_pson_handler, NULL},
+  {"FM_CPU_ERR0_LVT3_N", "GPIOF0", GPIO_EDGE_FALLING, cpu_event_handler, NULL},
+  {"FM_CPU_ERR1_LVT3_N", "GPIOF1", GPIO_EDGE_FALLING, cpu_event_handler, NULL},
+  {"FM_CPU_ERR2_LVT3_N", "GPIOF2", GPIO_EDGE_FALLING, cpu_event_handler, NULL},
   {"FM_MEM_THERM_EVENT_CPU0_LVT3_N", "GPIOB0", GPIO_EDGE_FALLING, mem_thermtrip_handler, NULL},
   {"FM_MEM_THERM_EVENT_CPU1_LVT3_N", "GPIOB1", GPIO_EDGE_FALLING, mem_thermtrip_handler, NULL},
   {"FM_SYS_THROTTLE_LVC3", "GPIOR7", GPIO_EDGE_BOTH, gpio_event_pson_handler, NULL},
   {"IRQ_DIMM_SAVE_LVT3_N", "GPION4", GPIO_EDGE_BOTH, gpio_event_pson_handler, NULL},
-  {"FM_HSC_TIMER_EXP_N", "GPIOM2", GPIO_EDGE_BOTH, gpio_event_handler, NULL},
-  {"FM_CPU0_PROCHOT_LVT3_BMC_N", "GPIOB5", GPIO_EDGE_BOTH, cpu_prochot_handler, NULL},
-  {"FM_CPU1_PROCHOT_LVT3_BMC_N", "GPIOB6", GPIO_EDGE_BOTH, cpu_prochot_handler, NULL},
-  {"IRQ_SMI_ACTIVE_BMC_N", "GPIOAA6", GPIO_EDGE_BOTH, gpio_event_pson_handler, NULL},
-  {"PWRGD_CPU0_LVC3", "GPIOZ1", GPIO_EDGE_BOTH, cpu_pwr_handler, init_cpu_pwrok},
+  {"FM_HSC_TIMER_EXP_N", "GPIOM2", GPIO_EDGE_BOTH, hsc_timer_exp_handler, NULL},
+  {"FM_CPU0_PROCHOT_LVT3_BMC_N", "GPIOB6", GPIO_EDGE_BOTH, cpu_prochot_handler, NULL},
+  {"FM_CPU1_PROCHOT_LVT3_BMC_N", "GPIOB7", GPIO_EDGE_BOTH, cpu_prochot_handler, NULL},
+  {"FM_PVCCIN_CPU0_PWR_IN_ALERT_N", "GPIOAA2", GPIO_EDGE_FALLING, cpu0_pvccin_pwr_in_handler, NULL},
+  {"FM_PVCCIN_CPU1_PWR_IN_ALERT_N", "GPIOAA3", GPIO_EDGE_FALLING, cpu1_pvccin_pwr_in_handler, NULL},
+  {"PWRGD_CPU0_LVC3", "GPIOZ1", GPIO_EDGE_BOTH, cpu_pwr_handler, NULL},
 };
 
 int main(int argc, char **argv)
@@ -746,6 +956,7 @@ int main(int argc, char **argv)
   pthread_t tid_ierr_mcerr_event;
   pthread_t tid_gpio_timer;
   pthread_t tid_ioex0_monitor;
+  pthread_t tid_power_fail_monitor;
 
   pid_file = open("/var/run/gpiod.pid", O_CREAT | O_RDWR, 0666);
   rc = flock(pid_file, LOCK_EX | LOCK_NB);
@@ -771,16 +982,21 @@ int main(int argc, char **argv)
     }
 
     if (pthread_create(&tid_ioex0_monitor, NULL, ioex0_monitor, NULL) < 0) {
-      syslog(LOG_CRIT, "pthread_create for fan monitor error");
+      syslog(LOG_CRIT, "FRU: %d pthread_create for io expender monitor error", FRU_MB);
+      exit(1);
+    }
+
+    if (pthread_create(&tid_power_fail_monitor, NULL, power_fail_monitor, NULL) < 0) {
+      syslog(LOG_CRIT, "FRU: %d pthread_create for power fail monitor error", FRU_MB);
       exit(1);
     }
 
     polldesc = gpio_poll_open(g_gpios, sizeof(g_gpios)/sizeof(g_gpios[0]));
     if (!polldesc) {
-      syslog(LOG_CRIT, "Cannot start poll operation on GPIOs");
+      syslog(LOG_CRIT, "FRU: %d Cannot start poll operation on GPIOs", FRU_MB);
     } else {
       if (gpio_poll(polldesc, POLL_TIMEOUT)) {
-        syslog(LOG_CRIT, "Poll returned error");
+        syslog(LOG_CRIT, "FRU: %d Poll returned error", FRU_MB);
       }
       gpio_poll_close(polldesc);
     }

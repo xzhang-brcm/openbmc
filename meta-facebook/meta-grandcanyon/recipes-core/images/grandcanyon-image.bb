@@ -1,17 +1,7 @@
 # Copyright 2020-present Facebook. All Rights Reserved.
 
-#
-# u-boot binary is ~500KB, so let's adjust u-boot max size and fit image
-# location as below:
-#   - u-boot partition: 0 - 0xDF000 (892KB, 913,408 bytes)
-#   - u-boot-env partition: 0xE0000 - 0xFFFFF (128KB)
-#   - FIT image starts at: 0x100000 (1MB)
-#
-UBOOT_PART_MAX_BYTES = "913408"
-UBOOT_CKSUM_OFFSET_KB = "892"
-FLASH_FIT_OFFSET_KB = "1024"
-
-inherit kernel_fitimage
+require recipes-core/images/fbobmc-image-meta.inc
+require grandcanyon-image-layout.inc
 
 require recipes-core/images/fb-openbmc-image.bb
 
@@ -20,4 +10,40 @@ IMAGE_INSTALL += " \
   packagegroup-openbmc-base \
   packagegroup-openbmc-net \
   packagegroup-openbmc-python3 \
+  setup-gpio \
+  ipmbd \
+  ipmid \
+  ipmitool \
+  expander-util \
+  mterm \
+  plat-utils \
+  fw-util \
+  fruid \
+  name-util \
+  log-util-v2 \
+  openbmc-utils \
+  fan-util \
+  fscd \
+  guid-util \
+  sensor-util \
+  sensor-mon \
+  fpc-util \
+  front-paneld \
+  i2craw \
+  healthd \
+  cfg-util \
+  threshold-util \
+  libncsi \
+  ncsid-v2 \
+  ncsi-util \
+  ipmb-util \
+  exp-cached \
+  bic-cached \
+  power-util \
+  usbutils \
+  usb-console \
+  gpiointrd \
+  crashdump \
+  me-util \
+  throttle-util \
   "

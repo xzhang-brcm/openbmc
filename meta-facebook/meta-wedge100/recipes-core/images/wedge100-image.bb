@@ -32,4 +32,5 @@ IMAGE_INSTALL += " \
   spatula \
   fscd  \
   recover-from-secondary \
+  udev-rules \
   "

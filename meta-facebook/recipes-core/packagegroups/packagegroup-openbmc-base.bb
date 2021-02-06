@@ -7,6 +7,7 @@ inherit packagegroup
 
 RDEPENDS_${PN} += " \
   fw-util \
+  obmc-dump \
   gpiocli \
   i2c-tools \
   kernel-modules \
@@ -20,7 +21,6 @@ RDEPENDS_${PN} += " \
   rsyslog \
   sudo \
   tzdata \
-  u-boot \
   u-boot-fw-utils \
   wdtcli \
   udev-rules \

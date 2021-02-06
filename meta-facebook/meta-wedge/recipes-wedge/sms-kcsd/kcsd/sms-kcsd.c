@@ -30,8 +30,12 @@
 #include <errno.h>
 #include <syslog.h>
 #include <string.h>
+#include <getopt.h>
+#include <linux/limits.h>
 #include <openbmc/ipmi.h>
 #include <openbmc/obmc-i2c.h>
+#include <openbmc/misc-utils.h>
+#include <openbmc/log.h>
 
 #include "alert_control.h"
 
@@ -43,6 +47,30 @@ typedef struct {
   unsigned char length;
   unsigned char buf[];
 } kcs_msg_t;
+
+static int verbose_logging;
+
+#define KCSD_VERBOSE(fmt, args...)   \
+  do {                               \
+    if (verbose_logging)             \
+      syslog(LOG_INFO, fmt, ##args); \
+  } while (0)
+
+/*
+ * Function to sanity test if ipmid is ready for accepting messages.
+ */
+static bool
+is_ipmid_ready(void)
+{
+  char path[PATH_MAX];
+
+  /*
+   * NOTE: socket file exists doesn't necessarily mean ipmid is ready for
+   * accepting messages, but it's better than not checking anything.
+   */
+  snprintf(path, sizeof(path), "/tmp/%s", SOCK_PATH_IPMI);
+  return path_exists(path);
+}
 
 /*
  * Function to check if there is any new KCS message available
@@ -67,7 +95,6 @@ handle_kcs_msg(void) {
   unsigned char tbuf[256] = {0};
   unsigned short tlen = 0;
   int count = 0;
-  int i = 0;
 
   // Reads incoming request
   fp = fopen(PATH_SMS_KCS, "r");
@@ -112,16 +139,90 @@ handle_kcs_msg(void) {
   return 0;
 }
 
+static void
+dump_usage(const char *prog_name)
+{
+  int i;
+  struct {
+    const char *opt;
+    const char *desc;
+  } options[] = {
+    {"-h|--help", "print this help message"},
+    {"-v|--verbose", "enable verbose logging"},
+    {NULL, NULL},
+  };
+
+  printf("Usage: %s [options]\n", prog_name);
+  for (i = 0; options[i].opt != NULL; i++) {
+    printf("    %-18s - %s\n", options[i].opt, options[i].desc);
+  }
+}
+
 /*
  * Daemon Main loop
  */
 int main(int argc, char **argv) {
-  int i;
-  int ret;
+  int i, ret;
+  bool ipmid_ready = false;
+  struct option long_opts[] = {
+    {"help",       no_argument, NULL, 'h'},
+    {"verbose",    no_argument, NULL, 'v'},
+    {"foreground", no_argument, NULL, 'f'},
+    {NULL,         0,           NULL, 0},
+  };
+
+  while (1) {
+    int opt_index = 0;
+
+    ret = getopt_long(argc, argv, "hv", long_opts, &opt_index);
+    if (ret == -1)
+      break; /* end of arguments */
+
+    switch (ret) {
+    case 'h':
+      dump_usage(argv[0]);
+      return 0;
+
+    case 'v':
+      verbose_logging = 1;
+      break;
+
+    default:
+      return -1;
+    }
+  } /* while */
+
+  obmc_log_init("sms-kcs", LOG_INFO, 0);
+  obmc_log_set_syslog(LOG_CONS, LOG_DAEMON);
+  obmc_log_unset_std_stream();
   daemon(1, 0);
-  openlog("sms-kcs", LOG_CONS, LOG_DAEMON);
+
+  /*
+   * Wait till ipmid is ready.
+   */
+  KCSD_VERBOSE("checking if ipmid is ready..");
+  for (i = 0; i < MAX_ALERT_CONTROL_RETRIES; i++) {
+    ipmid_ready = is_ipmid_ready();
+    if (ipmid_ready) {
+      /*
+       * sleep another 50 milliseconds just in case ipmid was de-scheduled
+       * right after creating the socket (but before setting it to passive
+       * socket).
+       */
+      usleep(50000);
+      break;
+    }
+
+    sleep(1);
+  }
+  if (!ipmid_ready) {
+    OBMC_WARN("ipmid is not ready after %d retries. Exiting",
+              MAX_ALERT_CONTROL_RETRIES);
+    return -1;
+  }
 
   // Enable alert for SMS KCS Function Block
+  KCSD_VERBOSE("enabling SMS KCS function..");
   for (i = 0; i < MAX_ALERT_CONTROL_RETRIES; i++) {
     ret = alert_control(FBID_SMS_KCS, FLAG_ENABLE);
     if (!ret) {
@@ -129,16 +230,16 @@ int main(int argc, char **argv) {
     }
     sleep(2);
   }
-
-  // Exit with error in case we can not set the Alert
-  if(ret) {
-    syslog(LOG_ALERT, "Can not enable SMS KCS Alert: %s\n", strerror(errno));
+  if (ret) {
+    OBMC_ERROR(errno, "Can not enable SMS KCS Alert");
     exit(-1);
   }
 
   // Forever loop to poll and process KCS messages
+  KCSD_VERBOSE("entering main loop..");
   while (1) {
     if (is_new_kcs_msg()) {
+      KCSD_VERBOSE("handling new kcs messages..");
       handle_kcs_msg();
     }
     sleep(1);

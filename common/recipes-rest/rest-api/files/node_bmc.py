@@ -21,7 +21,7 @@
 import os.path
 import re
 import json
-from subprocess import PIPE, Popen
+from subprocess import PIPE, Popen, check_output, CalledProcessError
 from uuid import getnode as get_mac
 
 import kv
@@ -124,13 +124,13 @@ class bmcNode(node):
                         uboot_version = matched.group("uboot_ver")
                         break
         else:
-            mtd_dev = "/dev/" + mtd_meta
-            with open(mtd_dev, "r") as f:
-                raw_data = f.readline()
-                try:
-                    uboot_version = json.loads(raw_data)["version_infos"]["uboot_ver"]
-                except:
-                    uboot_version = None
+            try:
+                mtd_dev = "/dev/" + mtd_meta
+                with open(mtd_dev, "r") as f:
+                    raw_data = f.readline()
+                uboot_version = json.loads(raw_data)["version_infos"]["uboot_ver"]
+            except Exception:
+                uboot_version = None
         return uboot_version
 
     def getUbootVer(self):
@@ -144,6 +144,72 @@ class bmcNode(node):
             if uboot_version:
                 kv.kv_set(UBOOT_VER_KV_KEY, uboot_version, kv.FCREATE)
         return uboot_version
+
+    def getTpmTcgVer(self):
+        out_str = "NA"
+        tpm1_caps = "/sys/class/tpm/tpm0/device/caps"
+        if os.path.isfile(tpm1_caps):
+            with open(tpm1_caps) as f:
+                for line in f:
+                    if "TCG version:" in line:
+                        out_str = line.strip("TCG version: ").strip("\n")
+        elif os.path.isfile("/usr/bin/tpm2_getcap"):
+            cmd_list = []
+            cmd_list.append("/usr/bin/tpm2_getcap -c properties-fixed 2>/dev/null | grep -A2 TPM_PT_FAMILY_INDICATOR")
+            cmd_list.append("/usr/bin/tpm2_getcap properties-fixed 2>/dev/null | grep -A2 TPM2_PT_FAMILY_INDICATOR")
+            for cmd in cmd_list:
+                try:
+                    lines = check_output(cmd, shell=True).decode().split("\n")
+                    out_str = lines[2].rstrip().split("\"")[1]
+                    break
+                except Exception as e:
+                    pass
+        return out_str
+
+    def getTpmFwVer(self):
+        out_str = "NA"
+        tpm1_caps = "/sys/class/tpm/tpm0/device/caps"
+        if os.path.isfile(tpm1_caps):
+            with open(tpm1_caps) as f:
+                for line in f:
+                    if "Firmware version:" in line:
+                        out_str = line.strip("Firmware version: ").strip("\n")
+        elif os.path.isfile("/usr/bin/tpm2_getcap"):
+            cmd_list = []
+            cmd_list.append("/usr/bin/tpm2_getcap -c properties-fixed 2>/dev/null | grep TPM_PT_FIRMWARE_VERSION_1")
+            cmd_list.append("/usr/bin/tpm2_getcap properties-fixed 2>/dev/null | grep -A1 TPM2_PT_FIRMWARE_VERSION_1 | grep raw")
+            for cmd in cmd_list:
+                try:
+                    line = check_output(cmd, shell=True)
+                    value = int(line.decode().rstrip().split(":")[1], 16)
+                    out_str = "%d.%d" % (value >> 16, value & 0xFFFF)
+                    break
+                except Exception as e:
+                    pass
+        return out_str
+
+    def getMemInfo(self):
+        desired_keys = (
+            "MemTotal",
+            "MemAvailable",
+            "MemFree",
+            "Shmem",
+            "Buffers",
+            "Cached",
+        )
+        meminfo = {}
+        with open("/proc/meminfo", "r") as mi:
+            for line in mi:
+                try:
+                    key, value = line.split(":", 1)
+                    key = key.strip()
+                    if key not in desired_keys:
+                        continue
+                    memval, _ = value.strip().split(" ", 1)
+                    meminfo[key] = int(memval)
+                except ValueError:
+                    pass
+        return meminfo
 
     def getInformation(self, param=None):
         # Get Platform Name
@@ -196,6 +262,8 @@ class bmcNode(node):
         mem_usage = adata[0]
         cpu_usage = adata[1]
 
+        memory = self.getMemInfo()
+
         # Get OpenBMC version
         obc_version = ""
         data = Popen("cat /etc/issue", shell=True, stdout=PIPE).stdout.read().decode()
@@ -223,21 +291,8 @@ class bmcNode(node):
         tpm_tcg_version = "NA"
         tpm_fw_version = "NA"
         if os.path.exists("/sys/class/tpm/tpm0"):
-            tpm1_caps = "/sys/class/tpm/tpm0/device/caps"
-            if os.path.isfile(tpm1_caps):
-                with open(tpm1_caps) as f:
-                    for line in f:
-                        if "TCG version:" in line:
-                            tpm_tcg_version = line.strip("TCG version: ").strip("\n")
-                        elif "Firmware version:" in line:
-                            tpm_fw_version = line.strip("Firmware version: ").strip("\n")
-            elif os.path.isfile("/usr/bin/tpm2_getcap"):
-                with Popen("/usr/bin/tpm2_getcap -c properties-fixed 2>/dev/null", shell=True, stdout=PIPE) as f:
-                    tpm_tcg_version = f.stdout.readlines()[2].decode().split("\"")[1]
-                with Popen("/usr/bin/tpm2_getcap -c properties-fixed 2>/dev/null", shell=True, stdout=PIPE) as f:
-                    value = f.stdout.readlines()[21].decode().strip("\n").split(":")[1]
-                    value = int(value, 16)
-                    tpm_fw_version = "%d.%d" % (value >> 16, value & 0xFFFF)
+            tpm_tcg_version = self.getTpmTcgVer()
+            tpm_fw_version = self.getTpmFwVer()
 
         spi0_vendor = getSPIVendor(0)
         spi1_vendor = getSPIVendor(1)
@@ -261,6 +316,7 @@ class bmcNode(node):
             # more pass-through proxy
             "uptime": uptime_seconds,
             "Memory Usage": mem_usage,
+            "memory": memory,
             "CPU Usage": cpu_usage,
             "OpenBMC Version": obc_version,
             "u-boot version": uboot_version,

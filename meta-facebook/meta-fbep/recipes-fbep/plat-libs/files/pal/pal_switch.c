@@ -79,14 +79,14 @@ int pal_check_pax_fw_type(uint8_t comp, const char *fwimg)
 
 void pal_clear_pax_cache(uint8_t paxid)
 {
-  char cmd[128] = {0};
+  char key[MAX_KEY_LEN];
 
-  snprintf(cmd, sizeof(cmd), "/tmp/cache_store/pax%d_bl2", paxid);
-  unlink(cmd);
-  snprintf(cmd, sizeof(cmd), "/tmp/cache_store/pax%d_img", paxid);
-  unlink(cmd);
-  snprintf(cmd, sizeof(cmd), "/tmp/cache_store/pax%d_cfg", paxid);
-  unlink(cmd);
+  snprintf(key, sizeof(key), "pax%d_bl2", paxid);
+  kv_del(key, 0);
+  snprintf(key, sizeof(key), "pax%d_img", paxid);
+  kv_del(key, 0);
+  snprintf(key, sizeof(key), "pax%d_cfg", paxid);
+  kv_del(key, 0);
 }
 
 int pal_pax_fw_update(uint8_t paxid, const char *fwimg)
@@ -143,10 +143,12 @@ int pal_read_pax_dietemp(uint8_t sensor_num, float *value)
   switchtec_close(dev);
   pax_unlock(fd);
 
-  if (ret == 0)
+  if (ret == 0) {
     *value = (float) temp / 100.0;
-
-  return ret < 0? ERR_SENSOR_NA: 0;
+    return 0;
+  } else {
+    return ERR_SENSOR_NA;
+  }
 }
 
 static struct switchtec_fw_part_summary* get_pax_ver_sum(uint8_t paxid)

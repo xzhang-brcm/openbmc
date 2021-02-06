@@ -39,6 +39,7 @@
 #include <openbmc/nl-wrapper.h>
 #include <sys/socket.h>
 #include <linux/netlink.h>
+#include <sys/un.h>
 #include "pal.h"
 
 #define PLATFORM_NAME "yosemitev3"
@@ -51,39 +52,61 @@
 #define PFR_NICEXP_BUS 9  // NICEXP PFR
 #define PFR_BB_BUS 12     // Baseboard PFR
 #define PFR_MAILBOX_ADDR (0x70)
+#define NUM_SERVER_FRU  4
+#define NUM_NIC_FRU     1
+#define NUM_BMC_FRU     1
 
 const char pal_fru_list_print[] = "all, slot1, slot2, slot3, slot4, bmc, nic, bb, nicexp";
 const char pal_fru_list_rw[] = "slot1, slot2, slot3, slot4, bmc, bb, nicexp";
 const char pal_fru_list_sensor_history[] = "all, slot1, slot2, slot3, slot4, bmc nic";
-
 const char pal_fru_list[] = "all, slot1, slot2, slot3, slot4, bmc, nic";
 const char pal_guid_fru_list[] = "slot1, slot2, slot3, slot4, bmc";
 const char pal_server_list[] = "slot1, slot2, slot3, slot4";
-const char pal_dev_list[] = "all, 1U, 2U, 1U-dev0, 1U-dev1, 1U-dev2, 1U-dev3, 2U-dev0, 2U-dev1, 2U-dev2, 2U-dev3, 2U-dev4, 2U-dev5";
+const char pal_dev_fru_list[] = "all, 1U, 2U, 1U-dev0, 1U-dev1, 1U-dev2, 1U-dev3, 2U-dev0, 2U-dev1, 2U-dev2, 2U-dev3, 2U-dev4, 2U-dev5, " \
+                            "2U-dev6, 2U-dev7, 2U-dev8, 2U-dev9, 2U-dev10, 2U-dev11, 2U-dev12, 2U-dev13";
+const char pal_dev_pwr_list[] = "all, 1U-dev0, 1U-dev1, 1U-dev2, 1U-dev3, 2U-dev0, 2U-dev1, 2U-dev2, 2U-dev3, 2U-dev4, 2U-dev5, " \
+                            "2U-dev6, 2U-dev7, 2U-dev8, 2U-dev9, 2U-dev10, 2U-dev11, 2U-dev12, 2U-dev13";
 const char pal_dev_pwr_option_list[] = "status, off, on, cycle";
+const char *pal_server_fru_list[NUM_SERVER_FRU] = {"slot1", "slot2", "slot3", "slot4"};
+const char *pal_nic_fru_list[NUM_NIC_FRU] = {"nic"};
+const char *pal_bmc_fru_list[NUM_BMC_FRU] = {"bmc"};
 
-#define MAX_NUM_DEVS 12
+size_t server_fru_cnt = NUM_SERVER_FRU;
+size_t nic_fru_cnt  = NUM_NIC_FRU;
+size_t bmc_fru_cnt  = NUM_BMC_FRU;
 
 #define SYSFW_VER "sysfw_ver_slot"
 #define SYSFW_VER_STR SYSFW_VER "%d"
 #define BOOR_ORDER_STR "slot%d_boot_order"
 #define GPIO_OCP_DEBUG_BMC_PRSNT_N "OCP_DEBUG_BMC_PRSNT_N"
 
-#define CPLD_ADDRESS 0x1E
 #define SLOT1_POSTCODE_OFFSET 0x02
 #define SLOT2_POSTCODE_OFFSET 0x03
 #define SLOT3_POSTCODE_OFFSET 0x04
 #define SLOT4_POSTCODE_OFFSET 0x05
 #define DEBUG_CARD_UART_MUX 0x06
 
+#define BB_CPLD_IO_BASE_OFFSET 0x16
+
 #define ENABLE_STR "enable"
 #define DISABLE_STR "disable"
 #define STATUS_STR "status"
 #define FAN_MODE_FILE "/tmp/cache_store/fan_mode"
+#define FAN_MODE_STR_LEN 8 // include the string terminal
+
+#define IPMI_GET_VER_FRU_NUM  5
+#define IPMI_GET_VER_MAX_COMP 9
+#define MAX_FW_VER_LEN        32  //include the string terminal 
 
 enum key_event {
   KEY_BEFORE_SET,
   KEY_AFTER_INI,
+};
+
+enum sel_event_data_index {
+  DATA_INDEX_0 = 3,
+  DATA_INDEX_1 = 4,
+  DATA_INDEX_2 = 5,
 };
 
 struct pal_key_cfg {
@@ -122,6 +145,16 @@ struct pal_key_cfg {
   {LAST_KEY, LAST_KEY, NULL} /* This is the last key of the list */
 };
 
+MAPTOSTRING root_port_common_mapping[] = {
+    // NIC
+    { 0xB2, 0, 0x4A, "Class 2", "NIC"}, // Class 2 NIC
+    { 0x63, 3, 0x2D, "Class 1", "NIC"}, // Class 1 NIC
+
+    // DL
+    { 0x63, 2, 0x2C, "Num 0", "SB" },   // PVT switch Num 1 to 0
+    { 0x00, 0x1D, 0xFF, "Num 1", "SB"}, // PVT -> Remove
+};
+
 MAPTOSTRING root_port_mapping[] = {
     { 0xB2, 3, 0x3D, "Num 0", "1OU"}, //Port 0x4D
     { 0xB2, 2, 0x3C, "Num 1", "1OU"}, //Port 0x4C
@@ -133,32 +166,38 @@ MAPTOSTRING root_port_mapping[] = {
     { 0x63, 0, 0x2A, "Num 3", "2OU"}, //Port 0x2A
     { 0x15, 2, 0x1C, "Num 4", "2OU"}, //Port 0x1C
     { 0x15, 3, 0x1D, "Num 5", "2OU"}, //Port 0x1D
-    // NIC
-    { 0xB2, 0, 0x4A, "Class 2", "NIC"}, // Class 2 NIC    TODO check root port
-    { 0x63, 3, 0x2D, "Class 1", "NIC"}, // Class 1 NIC
-    // DL
-    { 0x63, 2, 0x2C, "Num 1", "SB" },
-    { 0x00, 0x1D, 0xFF, "Num 0", "SB"},
 };
 
-MAPTOSTRING root_port_mapping_spe[] = {
+MAPTOSTRING root_port_mapping_gpv3[] = {
     // bus, device, port, silk screen, location
-    { 0xB2, 3, 0x3D, "Num 0", "1OU"},
-    { 0xB2, 2, 0x3C, "Num 1", "1OU"},
-    { 0xB2, 1, 0x3B, "Num 2", "1OU"},
-    { 0xB2, 0, 0x3A, "Num 3", "1OU"},
+    { 0x17, 0, 0x01, "Num 0", "2OU"},
+    { 0x17, 1, 0x02, "Num 1", "2OU"},
+    { 0x17, 2, 0x03, "Num 2", "2OU"},
+    { 0x17, 3, 0x04, "Num 3", "2OU"},
+    { 0x17, 4, 0x05, "Num 4", "2OU"},
+    { 0x17, 5, 0x06, "Num 5", "2OU"},
+    { 0x17, 6, 0x07, "Num 6", "2OU"},
+    { 0x17, 7, 0x08, "Num 7", "2OU"},
+    { 0x65, 0, 0x09, "Num 8", "2OU"},
+    { 0x65, 1, 0x0A, "Num 9", "2OU"},
+    { 0x65, 2, 0x0B, "Num 10", "2OU"},
+    { 0x65, 3, 0x0C, "Num 11", "2OU"},
+    { 0x17, 8, 0x0D, "E1S 0", "2OU"},
+    { 0x65, 4, 0x0E, "E1S 1", "2OU"},
+};
+
+MAPTOSTRING root_port_mapping_e1s[] = {
+    // bus, device, port, silk screen, location
+    { 0xB2, 0, 0x3A, "Num 0", "1OU"},
+    { 0xB2, 1, 0x3B, "Num 1", "1OU"},
+    { 0xB2, 2, 0x3C, "Num 2", "1OU"},
+    { 0xB2, 3, 0x3D, "Num 3", "1OU"},
     { 0x63, 0, 0x2A, "Num 0", "2OU"},
     { 0x63, 1, 0x2B, "Num 1", "2OU"},
     { 0x15, 3, 0x1D, "Num 2", "2OU"},
     { 0x15, 2, 0x1C, "Num 3", "2OU"},
     { 0x15, 1, 0x1B, "Num 4", "2OU"},
     { 0x15, 0, 0x1A, "Num 5", "2OU"},
-    // NIC
-    { 0xB2, 0, 0x4A, "Class 2", "NIC"}, // Class 2 NIC    TODO check root port
-    { 0x63, 3, 0x2D, "Class 1", "NIC"}, // Class 1 NIC
-    // DL
-    { 0x63, 2, 0x2C, "Num 1", "SB" },
-    { 0x00, 0x1D, 0xFF, "Num 0", "SB"},
 };
 
 PCIE_ERR_DECODE pcie_err_tab[] = {
@@ -367,7 +406,17 @@ pal_set_boot_order(uint8_t slot_id, uint8_t *boot, uint8_t *res_data, uint8_t *r
     }
 
     snprintf(tstr, 3, "%02x", boot[i]);
+#pragma GCC diagnostic push
+// avoid the following compililatin error
+//     error: '__builtin___strncat_chk' output may be truncated copying 3 bytes from a string of length 9 [-Werror=stringop-truncation]
+//
+// per https://stackoverflow.com/questions/50198319/gcc-8-wstringop-truncation-what-is-the-good-practice
+// this warning was was added in gcc8
+//
+// here we do want to truncate the string
+#pragma GCC diagnostic ignored "-Wstringop-truncation"
     strncat(str, tstr, 3);
+#pragma GCC diagnostic pop
   }
 
   //not allow having more than 1 network boot device in the boot order
@@ -506,6 +555,64 @@ int
 pal_get_fru_list(char *list) {
   strcpy(list, pal_fru_list);
   return PAL_EOK;
+}
+
+int
+pal_get_dev_list(uint8_t fru, char *list)
+{
+  strcpy(list, pal_dev_fru_list);
+  return 0;
+}
+
+int
+pal_get_fru_capabilities(uint8_t fru, unsigned int *caps)
+{
+  int ret = 0;
+
+  switch (fru) {
+    case FRU_SLOT1:
+    case FRU_SLOT2:
+    case FRU_SLOT3:
+    case FRU_SLOT4:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL |
+        FRU_CAPABILITY_SERVER | FRU_CAPABILITY_POWER_ALL |
+        FRU_CAPABILITY_POWER_12V_ALL | FRU_CAPABILITY_HAS_DEVICE;
+      break;
+    case FRU_BMC:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL |
+        FRU_CAPABILITY_MANAGEMENT_CONTROLLER;
+      break;
+    case FRU_NIC:
+      *caps = FRU_CAPABILITY_FRUID_READ | FRU_CAPABILITY_SENSOR_ALL |
+        FRU_CAPABILITY_NETWORK_CARD;
+      break;
+    case FRU_NICEXP:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_READ;
+      break;
+    case FRU_BB:
+      *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_READ;
+      break;
+    default:
+      ret = -1;
+      break;
+  }
+  return ret;
+}
+
+int
+pal_get_dev_capabilities(uint8_t fru, uint8_t dev, unsigned int *caps)
+{
+  if (fru < FRU_SLOT1 || fru > FRU_SLOT4)
+    return -1;
+  if (dev >= DEV_ID0_1OU && dev <= DEV_ID13_2OU) {
+    *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL |
+      (FRU_CAPABILITY_POWER_ALL & (~FRU_CAPABILITY_POWER_RESET));
+  } else if (dev >= BOARD_1OU && dev <= BOARD_2OU) {
+    *caps = FRU_CAPABILITY_FRUID_ALL | FRU_CAPABILITY_SENSOR_ALL;
+  } else {
+    *caps = 0;
+  }
+  return 0;
 }
 
 int
@@ -816,6 +923,7 @@ pal_dev_fruid_write(uint8_t fru, uint8_t dev_id, char *path) {
   int ret = PAL_ENOTSUP;
   uint8_t config_status = 0;
   uint8_t bmc_location = 0;
+  uint8_t type_2ou = UNKNOWN_BOARD;
 
   ret = fby3_common_get_bmc_location(&bmc_location);
   if ( ret < 0 ) {
@@ -833,12 +941,23 @@ pal_dev_fruid_write(uint8_t fru, uint8_t dev_id, char *path) {
 
   if ( (dev_id == BOARD_1OU) && ((config_status & PRESENT_1OU) == PRESENT_1OU) && (bmc_location != NIC_BMC) ) { // 1U
     return bic_write_fruid(fru, 0, path, FEXP_BIC_INTF);
-  } else if ( (dev_id == BOARD_2OU) && ((config_status & PRESENT_2OU) == PRESENT_2OU) ) { // 2U
-    return bic_write_fruid(fru, 0, path, REXP_BIC_INTF);
+  } else if ( (config_status & PRESENT_2OU) == PRESENT_2OU ) {
+    if ( fby3_common_get_2ou_board_type(fru, &type_2ou) < 0 ) {
+      syslog(LOG_WARNING, "%s() Failed to get 2OU board type\n", __func__);
+    } else if ( dev_id == BOARD_2OU && type_2ou == DP_RISER_BOARD ) {
+      return bic_write_fruid(fru, 1, path, NONE_INTF);
+    } else if ( dev_id == BOARD_2OU ) {
+      return bic_write_fruid(fru, 0, path, REXP_BIC_INTF);
+    } else if ( dev_id >= DEV_ID0_2OU && dev_id <= DEV_ID11_2OU ) {
+      return bic_write_fruid(fru, dev_id - DEV_ID0_2OU + 1, path, REXP_BIC_INTF);
+    } else {
+      printf("Dev%d is not supported on 2OU!\n", dev_id);
+    }
   } else {
     printf("%s is not present!\n", (dev_id == BOARD_1OU)?"1OU":"2OU");
     return PAL_ENOTSUP;
   }
+  return ret;
 }
 
 int
@@ -1162,24 +1281,81 @@ pal_set_fw_update_state(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_
   return CC_SUCCESS;
 }
 
+/*
+DP Riser bifurcation table
+-------------------------------------------------
+              | P3  P2  P1  P0 |  Speed
+-------------------------------------------------
+Retimer 1x16  | 0   1   0   0  |  x16 (0x08)
+Retimer 2x8   | 0   0   0   1  |  x8  (0x09)
+Retimer 4x4   | 0   0   0   0  |  x4  (0x0A)
+Others Cards  | 1   X   X   X  |  x16 (0x08)
+*/
+static int pal_get_dp_pcie_config(uint8_t slot_id, uint8_t *pcie_config) {
+  const uint8_t dp_pcie_card_mask = 0x08;
+  uint8_t dp_pcie_conf;
+  if (bic_get_dp_pcie_config(slot_id, &dp_pcie_conf)) {
+    syslog(LOG_ERR, "%s() Cannot get DP PCIE configuration\n", __func__);
+    return -1;
+  }
+
+  syslog(LOG_INFO, "%s() DP PCIE config: %u\n", __func__, dp_pcie_conf);
+
+  if (dp_pcie_conf & dp_pcie_card_mask) {
+    // PCIE Card
+    (*pcie_config) = CONFIG_D_DP_X16;
+  } else {
+    // Retimer Card
+    switch(dp_pcie_conf) {
+      case DP_RETIMER_X16:
+        (*pcie_config) = CONFIG_D_DP_X16;
+        break;
+      case DP_RETIMER_X8:
+        (*pcie_config) = CONFIG_D_DP_X8;
+        break;
+      case DP_RETIMER_X4:
+        (*pcie_config) = CONFIG_D_DP_X4;
+        break;
+      default:
+        syslog(LOG_ERR, "%s() Unable to get correct DP PCIE configuration\n", __func__);
+        return -1;
+    }
+  }
+
+  return 0;
+}
+
 int pal_get_poss_pcie_config(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len) {
   uint8_t pcie_conf = 0xff;
   uint8_t *data = res_data;
   int ret = 0, config_status = 0;
   uint8_t bmc_location = 0;
   uint8_t type_1ou = 0;
-
+  uint8_t type_2ou = UNKNOWN_BOARD;
   ret = fby3_common_get_bmc_location(&bmc_location);
-
   if (ret < 0) {
     syslog(LOG_ERR, "%s() Cannot get the location of BMC", __func__);
     return -1;
   }
 
   config_status = bic_is_m2_exp_prsnt(slot);
+  if ( (config_status & PRESENT_2OU) == PRESENT_2OU ) {
+    //check if GPv3 is installed
+    if ( fby3_common_get_2ou_board_type(slot, &type_2ou) < 0 ) {
+      syslog(LOG_WARNING, "%s() Failed to get 2OU board type\n", __func__);
+    }
+  }
 
   if ( (bmc_location == BB_BMC) || (bmc_location == DVT_BB_BMC) ) {
-    if (config_status == 0) {
+    if ( type_2ou == GPV3_MCHP_BOARD || type_2ou == GPV3_BRCM_BOARD ) {
+      pcie_conf = CONFIG_D_GPV3;
+    } else if (type_2ou == DP_RISER_BOARD) {
+      if (pal_get_dp_pcie_config(slot, &pcie_conf)) {
+        // Unable to get correct DP PCIE configuration
+        pcie_conf = CONFIG_UNKNOWN;
+      }
+      syslog(LOG_INFO, "%s() pcie_conf = %u\n", __func__, pcie_conf);
+    } else if (config_status == 0) {
       pcie_conf = CONFIG_A;
     } else if (config_status == 1) {
       bic_get_1ou_type(slot, &type_1ou);
@@ -1194,7 +1370,11 @@ int pal_get_poss_pcie_config(uint8_t slot, uint8_t *req_data, uint8_t req_len, u
       pcie_conf = CONFIG_B;
     }
   } else {
+    if ( type_2ou == GPV3_MCHP_BOARD || type_2ou == GPV3_BRCM_BOARD ) {
+      pcie_conf = CONFIG_C_GPV3;
+    } else {
       pcie_conf = CONFIG_C;
+    }
   }
 
   *data++ = pcie_conf;
@@ -1228,6 +1408,7 @@ pal_is_cmd_valid(uint8_t *data)
 static int
 pal_get_custom_event_sensor_name(uint8_t fru, uint8_t sensor_num, char *name) {
   int ret = PAL_EOK;
+  uint8_t board_type = 0;
 
   switch(fru) {
     case FRU_SLOT1:
@@ -1248,10 +1429,21 @@ pal_get_custom_event_sensor_name(uint8_t fru, uint8_t sensor_num, char *name) {
           sprintf(name, "PROC_FAIL");
           break;
         case BIC_SENSOR_SSD_HOT_PLUG:
-          sprintf(name, "SSD_HOT_PLUG");
+          if (fby3_common_get_2ou_board_type(fru, &board_type) < 0) {
+            syslog(LOG_ERR, "%s() Cannot get board_type", __func__);
+            board_type = M2_BOARD;
+          }
+          if (board_type == E1S_BOARD) {
+            snprintf(name, MAX_SNR_NAME, "E1S_NOT_PRESENT");
+          } else {
+            snprintf(name, MAX_SNR_NAME, "SSD_HOT_PLUG");
+          }
           break;
         case BB_BIC_SENSOR_POWER_DETECT:
           sprintf(name, "POWER_DETECT");
+          break;
+        case BB_BIC_SENSOR_BUTTON_DETECT:
+          sprintf(name, "BUTTON_DETECT");
           break;
         default:
           sprintf(name, "Unknown");
@@ -1427,14 +1619,147 @@ pal_parse_vr_event(uint8_t fru, uint8_t *event_data, char *error_log) {
 }
 
 static void
-pal_get_m2vpp_str_name(uint8_t comp, uint8_t root_port, char *error_log) {
+pal_sel_root_port_mapping_tbl(uint8_t fru, uint8_t *bmc_location, MAPTOSTRING **tbl, uint8_t *cnt) {
+  uint8_t board_1u = M2_BOARD;
+  uint8_t board_2u = M2_BOARD;
+  uint8_t config_status = CONFIG_UNKNOWN;
+  int ret = 0;
+
+  do {
+    ret = fby3_common_get_bmc_location(bmc_location);
+    if ( ret < 0 ) {
+      syslog(LOG_WARNING, "%s() Cannot get the location of BMC\n", __func__);
+      break;
+    }
+
+    ret = bic_is_m2_exp_prsnt(fru);
+    if ( ret < 0 ) {
+      syslog(LOG_WARNING, "%s() Cannot get bic_is_m2_exp_prsnt\n", __func__);
+      break;
+    } else config_status = (uint8_t)ret;
+
+    // For Config C and D, there are EDSFF_1U, E1S_BOARD and GPv3 architecture
+    // BMC should select the corresponding table.
+    // For Config B and A, root_port_mapping should be selected.
+    // only check it when 1OU is present
+    if ( *bmc_location != NIC_BMC && ((config_status & PRESENT_1OU) == PRESENT_1OU) ) {
+      ret = bic_get_1ou_type(fru, &board_1u);
+      if (ret < 0) {
+        syslog(LOG_ERR, "%s() Cannot get 1ou_board_type\n", __func__);
+        break;
+      }
+    }
+    // only check it when 2OU is present
+    if ( ((config_status & PRESENT_2OU) == PRESENT_2OU) ) {
+      ret = fby3_common_get_2ou_board_type(fru, &board_2u);
+      if (ret < 0) {
+        syslog(LOG_ERR, "%s() Cannot get 2ou_board_type\n", __func__);
+        break;
+      }
+    }
+  } while(0);
+
+  if ( ret < 0 ) {
+    syslog(LOG_ERR, "%s() Use the default root_port_mapping\n", __func__);
+    board_1u = M2_BOARD; //make sure the default is used
+    board_2u = M2_BOARD;
+  }
+
+  if ( board_1u == EDSFF_1U || board_2u == E1S_BOARD ) {
+    // case 1/2OU E1S
+    *tbl = root_port_mapping_e1s;
+    *cnt = sizeof(root_port_mapping_e1s)/sizeof(MAPTOSTRING);
+  } else if ( (board_2u == GPV3_MCHP_BOARD || board_2u == GPV3_BRCM_BOARD) && \
+              (*bmc_location == NIC_BMC) ) {
+    *tbl = root_port_mapping_gpv3;
+    *cnt = sizeof(root_port_mapping_gpv3)/sizeof(MAPTOSTRING);
+  } else {
+    *tbl = root_port_mapping;
+    *cnt = sizeof(root_port_mapping)/sizeof(MAPTOSTRING);
+  }
+  return;
+}
+
+static void
+pal_search_pcie_err(uint8_t err1_id, uint8_t err2_id, char **err1_desc, char **err2_desc) {
   int i = 0;
-  int size = ARRAY_SIZE(root_port_mapping);
+  int size = (sizeof(pcie_err_tab)/sizeof(PCIE_ERR_DECODE));
+
+  for ( i = 0; i < size; i++ ) {
+    if ( err2_id == pcie_err_tab[i].err_id ) {
+      *err2_desc = pcie_err_tab[i].err_descr;
+      continue;
+    } else if ( err1_id == pcie_err_tab[i].err_id ) {
+      *err1_desc = pcie_err_tab[i].err_descr;
+      continue;
+    }
+
+    if ( strcmp(*err1_desc,"NA") && strcmp(*err2_desc,"NA") ) {
+      break;
+    }
+  }
+  return;
+}
+
+static bool
+pal_search_pcie_dev(MAPTOSTRING *tbl, int size, uint8_t bmc_location, uint8_t dev, uint8_t bus, char **sil, char **location) {
+  int i = 0;
+  for ( i = 0; i < size; i++ ) {
+    // check bus and dev are match
+    if ( (bus == tbl[i].bus_value) && \
+         (dev == tbl[i].dev_value) ) {
+      *location = tbl[i].location;
+      // 1OU is not expected on class 2, skip
+      if ( !strcmp(*location, "1OU") && bmc_location == NIC_BMC ) {
+        continue;
+      }
+      *sil = tbl[i].silk_screen;
+      return true;
+    }
+  }
+  return false;
+}
+
+static void
+pal_get_pcie_err_string(uint8_t fru, uint8_t *pdata, char **sil, char **location, char **err1_str, char **err2_str) {
+  uint8_t bmc_location = 0;
+  uint8_t dev = pdata[0] >> 3;
+  uint8_t bus = pdata[1];
+  uint8_t err1_id = pdata[5];
+  uint8_t err2_id = pdata[4];
+  uint8_t size = 0;
+  MAPTOSTRING *mapping_table = NULL;
+
+  // get the table first
+  pal_sel_root_port_mapping_tbl(fru, &bmc_location, &mapping_table, &size);
+
+  // search for the device table first
+  if ( pal_search_pcie_dev(mapping_table, size, bmc_location, dev, bus, sil, location) == false ) {
+    // if dev is not found in the device table, search for the common table
+    size = sizeof(root_port_common_mapping)/sizeof(MAPTOSTRING);
+    pal_search_pcie_dev(root_port_common_mapping, size, bmc_location, dev, bus, sil, location);
+  }
+
+  // parse err
+  pal_search_pcie_err(err1_id, err2_id, err1_str, err2_str);
+  return;
+}
+
+static void
+pal_get_m2vpp_str_name(uint8_t fru, uint8_t comp, uint8_t root_port, char *error_log) {
+  int i = 0;
+  uint8_t size = 0;
+  uint8_t bmc_location = 0;
+  MAPTOSTRING *mapping_table = NULL;
+
+  // select root port mapping tbl first
+  pal_sel_root_port_mapping_tbl(fru, &bmc_location, &mapping_table, &size);
+
   for ( i = 0 ; i < size; i++ ) {
-    if ( root_port_mapping[i].root_port == root_port ) {
-      char *silk_screen = root_port_mapping[i].silk_screen;
-      char *location = root_port_mapping[i].location;
-      snprintf(error_log, 256, "%s/Num %s ", location, silk_screen);
+    if ( mapping_table[i].root_port == root_port ) {
+      char *silk_screen = mapping_table[i].silk_screen;
+      char *location = mapping_table[i].location;
+      snprintf(error_log, 256, "%s/%s ", location, silk_screen);
       return;
     }
   }
@@ -1445,16 +1770,28 @@ pal_get_m2vpp_str_name(uint8_t comp, uint8_t root_port, char *error_log) {
   return;
 }
 
-static void
-pal_get_m2pgood_str_name(uint8_t comp, uint8_t device_num, char *error_log) {
-  uint8_t index = comp - 1;
-  char *comp_str[4] = {"1OU", "2OU", "SP", "GPv3"};
-  if ( index < 4 ) {
-    snprintf(error_log, 256, "%s/Num %d ", comp_str[index], device_num);
-  } else {
-    snprintf(error_log, 256, "Undefined M2 DevNum %d ", device_num);
+static const char*
+pal_get_board_name(uint8_t comp) {
+  const char *comp_str[5] = {"ServerBoard", "1OU", "2OU", "SPE", "GPv3"};
+  const uint8_t comp_size = ARRAY_SIZE(comp_str);
+  if ( comp < comp_size ) {
+    return comp_str[comp];
   }
 
+  return "Undefined board";
+}
+
+static void
+pal_get_m2_str_name(uint8_t comp, uint8_t device_num, char *error_log) {
+  snprintf(error_log, 256, "%s/Num %d ", pal_get_board_name(comp), device_num);
+  return;
+}
+
+static void
+pal_get_2ou_vr_str_name(uint8_t comp, uint8_t vr_num, char *error_log) {
+  const char *vr_list_str[5] = {"P3V3_STBY1", "P3V3_STBY2", "P3V3_STBY3", "P1V8", "PESW VR"};
+  const uint8_t vr_list_size = ARRAY_SIZE(vr_list_str);
+  snprintf(error_log, 256, "%s/%s ", pal_get_board_name(comp), (vr_num < vr_list_size)?vr_list_str[vr_num]:"Undefined VR");
   return;
 }
 
@@ -1475,8 +1812,19 @@ pal_parse_sys_sts_event(uint8_t fru, uint8_t *event_data, char *error_log) {
     SYS_M2_VPP         = 0x0B,
     SYS_M2_PGOOD       = 0x0C,
     SYS_VCCIO_FAULT    = 0x0D,
+    SYS_SMI_STUCK_LOW  = 0x0E,
+    SYS_OV_DETECT      = 0x0F,
+    SYS_M2_OCP_DETECT  = 0x10,
+    SYS_SLOT_PRSNT     = 0x11,
+    SYS_PESW_ERR       = 0x12,
+    SYS_2OU_VR_FAULT   = 0x13,
+    SYS_FAN_SERVICE    = 0x14,
+    E1S_1OU_HSC_PWR_ALERT = 0x82,
   };
   uint8_t event = event_data[0];
+  char prsnt_str[32] = {0};
+  char log_msg[MAX_ERR_LOG_SIZE] = {0};
+  char fan_mode_str[FAN_MODE_STR_LEN] = {0};
 
   switch (event) {
     case SYS_THERM_TRIP:
@@ -1510,15 +1858,53 @@ pal_parse_sys_sts_event(uint8_t fru, uint8_t *event_data, char *error_log) {
       strcat(error_log, "VR WDT");
       break;
     case SYS_M2_VPP:
-      pal_get_m2vpp_str_name(event_data[1], event_data[2], error_log);
+      pal_get_m2vpp_str_name(fru, event_data[1], event_data[2], error_log);
       strcat(error_log, "VPP Power Control");
       break;
     case SYS_M2_PGOOD:
-      pal_get_m2pgood_str_name(event_data[1], event_data[2], error_log);
+      pal_get_m2_str_name(event_data[1], event_data[2], error_log);
       strcat(error_log, "Power Good Fault");
       break;
     case SYS_VCCIO_FAULT:
       strcat(error_log, "VCCIO fault");
+      break;
+    case SYS_SMI_STUCK_LOW:
+      strcat(error_log, "SMI stuck low over 90s");
+      break;
+    case SYS_OV_DETECT:
+      strcat(error_log, "VCCIO Over Voltage Fault");
+      break;
+    case SYS_M2_OCP_DETECT:
+      pal_get_m2_str_name(event_data[1], event_data[2], error_log);
+      strcat(error_log, "Load Switch OCP");
+      break;
+    case SYS_SLOT_PRSNT:
+      snprintf(prsnt_str, sizeof(prsnt_str), "Slot%d present", event_data[1]);
+      strcat(error_log, prsnt_str);
+      break;
+    case SYS_PESW_ERR:
+      strcat(error_log, "2OU PESW error");
+      break;
+    case SYS_2OU_VR_FAULT:
+      pal_get_2ou_vr_str_name(event_data[1], event_data[2], error_log);
+      strcat(error_log, "2OU VR fault");
+      break;
+    case SYS_FAN_SERVICE:
+      if (event_data[2] == FAN_MANUAL_MODE) {
+        snprintf(fan_mode_str, sizeof(fan_mode_str), "manual");
+      } else {
+        snprintf(fan_mode_str, sizeof(fan_mode_str), "auto");
+      }
+      if ((event_data[1] == FRU_SLOT1) || (event_data[1] == FRU_SLOT3)) {
+        snprintf(log_msg, sizeof(log_msg), "Fan mode changed to %s mode by slot%d", fan_mode_str, event_data[1]);
+      } else {
+        snprintf(log_msg, sizeof(log_msg), "Fan mode changed to %s mode by unknown slot", fan_mode_str);
+      }
+      
+      strcat(error_log, log_msg);
+      break;
+    case E1S_1OU_HSC_PWR_ALERT:
+      strcat(error_log, "E1S 1OU HSC Power");
       break;
     default:
       strcat(error_log, "Undefined system event");
@@ -1571,13 +1957,60 @@ static int
 pal_parse_pwr_detect_event(uint8_t fru, uint8_t *event_data, char *error_log) {
   enum {
     SLED_CYCLE = 0x00,
+    SLOT = 0x01,
   };
-  uint8_t event = event_data[0];
+  enum {
+    CYCLE_12V = 0x00,
+    ON_12V = 0x01,
+    OFF_12V = 0x02,
+  };
 
-  switch (event) {
+  switch (event_data[0]) {
     case SLED_CYCLE:
       pal_set_nic_perst(fru, NIC_PE_RST_LOW);
-      strcat(error_log, "SLED_CYCLE by other slot BMC");
+      strcat(error_log, "SLED_CYCLE by BB BIC");
+      break;
+    case SLOT:
+      strcat(error_log, "SERVER ");
+      switch (event_data[1]) {
+        case CYCLE_12V:
+          strcat(error_log, "12V CYCLE by BB BIC");
+          break;
+        case ON_12V:
+          strcat(error_log, "12V ON by BB BIC");
+          break;
+        case OFF_12V:
+          strcat(error_log, "12V OFF by BB BIC");
+          break;
+        default:
+          strcat(error_log, "Undefined Baseboard BIC event");
+          break;
+      }
+      break;
+    default:
+      strcat(error_log, "Undefined Baseboard BIC event");
+      break;
+  }
+
+  return PAL_EOK;
+}
+
+static int
+pal_parse_button_detect_event(uint8_t fru, uint8_t *event_data, char *error_log) {
+  enum {
+    ADAPTER_BUTTON_BMC_CO_N_R = 0x01,
+    AC_ON_OFF_BTN_SLOT1_N = 0x02,
+    AC_ON_OFF_BTN_SLOT3_N = 0x03,
+  };
+  switch (event_data[0]) {
+    case ADAPTER_BUTTON_BMC_CO_N_R:
+      strcat(error_log, "ADAPTER_BUTTON_BMC_CO_N_R");
+      break;
+    case AC_ON_OFF_BTN_SLOT1_N:
+      strcat(error_log, "AC_ON_OFF_BTN_SLOT1_N");
+      break;
+    case AC_ON_OFF_BTN_SLOT3_N:
+      strcat(error_log, "AC_ON_OFF_BTN_SLOT3_N");
       break;
     default:
       strcat(error_log, "Undefined Baseboard BIC event");
@@ -1618,6 +2051,9 @@ pal_parse_sel(uint8_t fru, uint8_t *sel, char *error_log) {
     case BB_BIC_SENSOR_POWER_DETECT:
       pal_parse_pwr_detect_event(fru, event_data, error_log);
       break;
+    case BB_BIC_SENSOR_BUTTON_DETECT:
+      pal_parse_button_detect_event(fru, event_data, error_log);
+      break;
     default:
       unknown_snr = true;
       break;
@@ -1642,65 +2078,19 @@ pal_parse_oem_unified_sel(uint8_t fru, uint8_t *sel, char *error_log)
 
   uint8_t general_info = (uint8_t) sel[3];
   uint8_t error_type = general_info & 0x0f;
-  uint8_t plat;
-  uint8_t board_type = 0;
-  uint8_t port_cnt = 0;
+  uint8_t plat = 0;
   char temp_log[128] = {0};
   error_log[0] = '\0';
-  int index = 0;
   char *sil = "NA";
   char *location = "NA";
   char *err1_descript = "NA", *err2_descript = "NA";
-  int ret = 0;
-  uint8_t bmc_location = 0;
-  MAPTOSTRING *mapping_table;
 
-  ret = fby3_common_get_2ou_board_type(fru, &board_type);
-  if (ret < 0) {
-    syslog(LOG_ERR, "%s() Cannot get board_type", __func__);
-    board_type = M2_BOARD;
-  }
-  if (board_type == M2_BOARD) {
-    mapping_table = root_port_mapping;
-    port_cnt = sizeof(root_port_mapping)/sizeof(MAPTOSTRING);
-  } else {
-    mapping_table = root_port_mapping_spe;
-    port_cnt = sizeof(root_port_mapping_spe)/sizeof(MAPTOSTRING);
-  }
   switch (error_type) {
     case UNIFIED_PCIE_ERR:
       plat = (general_info & 0x10) >> 4;
       if (plat == 0) {  //x86
-        for (index = 0; index < port_cnt; index++) {
-          if ((sel[11] == mapping_table[index].bus_value) && ((sel[10] >> 3) == mapping_table[index].dev_value)) {
-            location = mapping_table[index].location;
-            sil = mapping_table[index].silk_screen;
-            if (!strcmp(location, "1OU")) {
-              ret = fby3_common_get_bmc_location(&bmc_location);
-              if ( ret < 0 ) {
-                syslog(LOG_WARNING, "%s() Cannot get the location of BMC", __func__);
-              }
+        pal_get_pcie_err_string(fru, &sel[10], &sil, &location, &err1_descript, &err2_descript);
 
-              if (bmc_location == NIC_BMC ) {
-                continue;
-              }
-            }
-            break;
-          }
-        }
-
-        for (index = 0; index < (sizeof(pcie_err_tab)/sizeof(PCIE_ERR_DECODE)); index++) {
-          if (sel[14] == pcie_err_tab[index].err_id) {
-            err2_descript = pcie_err_tab[index].err_descr;
-            continue;
-          } else if (sel[15] == pcie_err_tab[index].err_id) {
-            err1_descript = pcie_err_tab[index].err_descr;
-            continue;
-          }
-          if ( strcmp(err1_descript,"NA") && strcmp(err2_descript,"NA") ) {
-            break;
-          }
-        }
         snprintf(error_log, ERROR_LOG_LEN, "GeneralInfo: x86/PCIeErr(0x%02X), Bus %02X/Dev %02X/Fun %02X, %s/%s,"
                             "TotalErrID1Cnt: 0x%04X, ErrID2: 0x%02X(%s), ErrID1: 0x%02X(%s)",
                 general_info, sel[11], sel[10] >> 3, sel[10] & 0x7, location, sil, ((sel[13]<<8)|sel[12]), sel[14], err2_descript, sel[15], err1_descript);
@@ -1713,7 +2103,7 @@ pal_parse_oem_unified_sel(uint8_t fru, uint8_t *sel, char *error_log)
       pal_add_cri_sel(temp_log);
       return 0;
   }
-  
+
   pal_parse_oem_unified_sel_common(fru, sel, error_log);
 
   return 0;
@@ -1742,6 +2132,50 @@ pal_is_debug_card_prsnt(uint8_t *status) {
   }
 
   return 0;
+}
+
+int
+pal_set_uart_IO_sts(uint8_t slot_id, uint8_t io_sts) {
+  const uint8_t UART_POS_BMC = 0x00;
+  const uint8_t MAX_RETRY = 3;
+  int i2cfd = -1;
+  int ret = PAL_EOK;
+  int retry = MAX_RETRY;
+  int st_idx = slot_id, end_idx = slot_id;
+  uint8_t tbuf[2] = {0x00};
+  uint8_t tlen = 2;
+
+  i2cfd = i2c_cdev_slave_open(BB_CPLD_BUS, CPLD_ADDRESS >> 1, I2C_SLAVE_FORCE_CLAIM);
+  if ( i2cfd < 0 ) {
+    syslog(LOG_WARNING, "Failed to open bus 12\n");
+    return i2cfd;
+  }
+
+  // adjust the st_idx and end_idx, we need to reset all reg values
+  // when uart_pos is at BMC position
+  if ( slot_id == UART_POS_BMC ) {
+    st_idx = FRU_SLOT1;
+    end_idx = FRU_SLOT4;
+  }
+
+  do {
+     tbuf[0] = BB_CPLD_IO_BASE_OFFSET + st_idx; //get the correspoding reg
+     tbuf[1] = io_sts; // data to be written
+     ret = i2c_rdwr_msg_transfer(i2cfd, CPLD_ADDRESS, tbuf, tlen, NULL, 0);
+     if ( ret < 0 ) {
+       retry--;
+     } else {
+       st_idx++; //move on
+       retry = MAX_RETRY; //reset it
+     }
+  } while ( retry > 0 && st_idx <= end_idx );
+
+  if ( retry == 0 ) {
+    syslog(LOG_WARNING, "Failed to update IO sts after performed 3 time attempts. reg:%02X, data: %02X\n", tbuf[0], tbuf[1]);
+  }
+
+  if ( i2cfd > 0 ) close(i2cfd);
+  return ret;
 }
 
 int
@@ -1888,11 +2322,26 @@ pal_store_crashdump(uint8_t fru, bool ierr) {
 
 static int
 pal_bic_sel_handler(uint8_t fru, uint8_t snr_num, uint8_t *event_data) {
+  int ret = 0;
 
   switch (snr_num) {
     case CATERR_B:
       pal_store_crashdump(fru, (event_data[3] == 0x00));  // 00h:IERR, 0Bh:MCERR
       break;
+    case BIC_SENSOR_SYSTEM_STATUS:
+      if (event_data[3] == 0x11) { // when another blade insert/remove, start/stop fscd
+        ret = system("/etc/init.d/setup-fan.sh reload &");
+        if (ret != 0) {
+          syslog(LOG_WARNING, "%s() can not reload setup-fan.sh", __func__);
+          return -1;
+        }
+      } else if (event_data[3] == SYS_FAN_EVENT) {
+        if (pal_is_fw_update_ongoing(fru) == true) {
+          return PAL_EOK;
+        }
+        // start/stop fscd according fan mode change
+        fby3_common_fscd_ctrl(event_data[DATA_INDEX_2]);
+      }
   }
 
   return PAL_EOK;
@@ -1925,7 +2374,7 @@ int
 pal_get_num_devs(uint8_t slot, uint8_t *num) {
 
   if (fby3_common_check_slot_id(slot) == 0) {
-      *num = MAX_NUM_DEVS;
+      *num = MAX_NUM_DEVS - 1;
   }
 
   return 0;
@@ -1984,7 +2433,7 @@ pal_handle_dcmi(uint8_t fru, uint8_t *request, uint8_t req_len, uint8_t *respons
 
 int
 pal_set_fan_ctrl (char *ctrl_opt) {
-  FILE* fp;
+  FILE* fp = NULL;
   uint8_t bmc_location = 0;
   uint8_t ctrl_mode, status;
   int ret = 0;
@@ -2002,19 +2451,19 @@ pal_set_fan_ctrl (char *ctrl_opt) {
     snprintf(cmd, sizeof(cmd), "sv start fscd > /dev/null 2>&1");
   } else if (!strcmp(ctrl_opt, DISABLE_STR)) {
     ctrl_mode = MANUAL_MODE;
-    snprintf(cmd, sizeof(cmd), "sv stop fscd > /dev/null 2>&1");
+    snprintf(cmd, sizeof(cmd), "sv force-stop fscd > /dev/null 2>&1");
   } else if (!strcmp(ctrl_opt, STATUS_STR)) {
     ctrl_mode = GET_FAN_MODE;
   } else {
     return -1;
   }
 
-  if (system(cmd) != 0) {
-    return -1;
-  }
-
+  // notify baseboard bic and another slot BMC (Class 2)
   if (bmc_location == NIC_BMC) {
     ret = bic_set_fan_auto_mode(ctrl_mode, &status);
+    if (bic_notify_fan_mode(ctrl_mode) < 0) {
+      return -1;
+    }    
   }
 
   if (ctrl_mode == GET_FAN_MODE) {
@@ -2036,7 +2485,35 @@ pal_set_fan_ctrl (char *ctrl_opt) {
       if(fgets(buf, sizeof(buf), fp) != NULL) {
         printf("Auto Mode:%s",buf);
       }
+      if(fp != NULL) pclose(fp);
     }
+  } else {  // AUTO_MODE or MANUAL_MODE
+    if(ctrl_mode == AUTO_MODE) {
+      if (system(cmd) != 0)
+        return -1;
+    } else if (ctrl_mode == MANUAL_MODE){
+      if (system(cmd) != 0) {
+        // Although sv force-stop sends kill (-9) signal after timeout,
+        // it still returns an error code.
+        // we will check status here to ensure that fscd has stopped completely.
+        syslog(LOG_WARNING, "%s() force-stop timeout", __func__);
+        snprintf(cmd, sizeof(cmd), "sv status fscd 2>/dev/null | cut -d: -f1");
+        if((fp = popen(cmd, "r")) == NULL) {
+          syslog(LOG_WARNING, "%s() popen failed, cmd: %s", __func__, cmd);
+          ret = -1;
+        } else if(fgets(buf, sizeof(buf), fp) == NULL) {
+          syslog(LOG_WARNING, "%s() read popen failed, cmd: %s", __func__, cmd);
+          ret = -1;
+        } else if(strncmp(buf, "down", 4) != 0) {
+          syslog(LOG_WARNING, "%s() failed to terminate fscd", __func__);
+          ret = -1;
+        }
+
+        if(fp != NULL) pclose(fp);
+        if(ret != 0) return ret;
+      }
+    }
+
   }
 
   return ret;
@@ -2099,6 +2576,41 @@ pal_is_pfr_active(void) {
 
   sprintf(dev_i2c, "/dev/i2c-%d", bus);
   ifd = open(dev_i2c, O_RDWR);
+  if (ifd < 0) {
+    return pfr_active;
+  }
+
+  tbuf[0] = 0x0A;
+  do {
+    if (!i2c_rdwr_msg_transfer(ifd, addr, tbuf, 1, rbuf, 1)) {
+      pfr_active = (rbuf[0] & 0x20) ? PFR_ACTIVE : PFR_UNPROVISIONED;
+      break;
+    }
+
+#ifdef DEBUG
+    syslog(LOG_WARNING, "i2c%u xfer failed, cmd: %02x", 4, tbuf[0]);
+#endif
+    if (--retry > 0)
+      msleep(20);
+  } while (retry > 0);
+  close(ifd);
+
+  return pfr_active;
+}
+
+int
+pal_is_slot_pfr_active(uint8_t fru) {
+  int pfr_active = PFR_NONE;
+  int ifd, retry = 3;
+  uint8_t tbuf[8], rbuf[8];
+  uint8_t bus, addr;
+  bool bridged;
+
+  if (pal_get_pfr_address(fru, &bus, &addr, &bridged)) {
+    return pfr_active;
+  }
+
+  ifd = i2c_cdev_slave_open(bus, addr >> 1, I2C_SLAVE_FORCE_CLAIM);
   if (ifd < 0) {
     return pfr_active;
   }
@@ -2588,11 +3100,12 @@ pal_check_sled_mgmt_cbl_id(uint8_t slot_id, uint8_t *cbl_val, bool log_evnt, uin
   uint8_t tlen = 1;
   uint8_t rlen = 1;
   uint8_t cpld_slot_cbl_val = 0;
+  uint8_t slot_id_tmp = slot_id;
 
   if ( bmc_location == BB_BMC ) {
     // EVT BB_BMC HW not support cable management
     // just return present to skip checking
-    cbl_val = STATUS_PRSNT;
+    cbl_val[0] = STATUS_PRSNT;
     return 0;
   } else if ( bmc_location == DVT_BB_BMC ) {
     //read GPIO vals
@@ -2646,20 +3159,30 @@ pal_check_sled_mgmt_cbl_id(uint8_t slot_id, uint8_t *cbl_val, bool log_evnt, uin
       gpio_vals |= (val << 0);
       val = BIT_VALUE(gpio, SLOT3_ID0_DETECT_BMC_N);
       gpio_vals |= (val << 1);
+      slot_id_tmp = 3;
     }
   }
 
   bool vals_match = (bmc_location == DVT_BB_BMC) ? (gpio_vals == mapping_tbl[slot_id-1]):(gpio_vals == cpld_slot_cbl_val);
-  if ( (log_evnt == true) && (vals_match == false) ) {
+  if (vals_match == false) {
     for ( i = 0; i < (sizeof(mapping_tbl)/sizeof(uint8_t)); i++ ) {
       if(mapping_tbl[i] == gpio_vals) {
         break;
       }
     }
-    syslog(LOG_CRIT, "Abnormal - slot%d instead of slot%d", slot_id, (i+1));
+    if (log_evnt == true) {
+      syslog(LOG_CRIT, "Abnormal - slot%d instead of slot%d", slot_id_tmp, (i+1));
+    }
   }
 
-  if ( cbl_val != NULL ) *cbl_val = (vals_match == false)?STATUS_ABNORMAL:STATUS_PRSNT;
+  if ( cbl_val != NULL ) {
+    cbl_val[0] = (vals_match == false)?STATUS_ABNORMAL:STATUS_PRSNT;
+    if (cbl_val[0] == STATUS_ABNORMAL) {
+      cbl_val[1] = slot_id_tmp << 4 | (i+1);
+    } else {
+      cbl_val[1] = 0x00;
+    }
+  }
   return ret;
 }
 
@@ -2727,13 +3250,14 @@ pal_get_fw_info(uint8_t fru, unsigned char target, unsigned char* res, unsigned 
   uint8_t config_status = CONFIG_UNKNOWN ;
   int ret = PAL_ENOTSUP;
   uint8_t tmp_cpld_swap[4] = {0};
- 
+  uint8_t type_2ou = UNKNOWN_BOARD;
+
   ret = fby3_common_get_bmc_location(&bmc_location);
   if (ret < 0) {
     syslog(LOG_ERR, "%s() Cannot get the location of BMC", __func__);
     goto error_exit;
   }
-  
+
   if (target == FW_CPLD) {
     const uint8_t cpld_addr = 0x80; /*8-bit addr*/
     uint8_t tbuf[4] = {0x00, 0x20, 0x00, 0x28};
@@ -2778,7 +3302,12 @@ pal_get_fw_info(uint8_t fru, unsigned char target, unsigned char* res, unsigned 
     case FW_2OU_BIC_BOOTLOADER:
     case FW_2OU_CPLD:
       config_status = (pal_is_fw_update_ongoing(fru) == false) ? bic_is_m2_exp_prsnt(fru):bic_is_m2_exp_prsnt_cache(fru);
+      if ( fby3_common_get_2ou_board_type(fru, &type_2ou) < 0 ) {
+        syslog(LOG_WARNING, "%s() Failed to get 2OU board type\n", __func__);
+      }
       if (!((config_status & PRESENT_2OU) == PRESENT_2OU)) {
+        goto not_support;
+      } else if (type_2ou == DP_RISER_BOARD) {
         goto not_support;
       }
       break;
@@ -2889,4 +3418,344 @@ error_exit:
   }
 
   return ret;
+}
+
+static const char *sock_path_asd_bic[MAX_NODES+1] = {
+  "",
+  SOCK_PATH_ASD_BIC "_1",
+  SOCK_PATH_ASD_BIC "_2",
+  SOCK_PATH_ASD_BIC "_3",
+  SOCK_PATH_ASD_BIC "_4"
+};
+
+static const char *sock_path_jtag_msg[MAX_NODES+1] = {
+  "",
+  SOCK_PATH_JTAG_MSG "_1",
+  SOCK_PATH_JTAG_MSG "_2",
+  SOCK_PATH_JTAG_MSG "_3",
+  SOCK_PATH_JTAG_MSG "_4"
+};
+
+int
+pal_handle_oem_1s_intr(uint8_t slot, uint8_t *data)
+{
+  int sock;
+  int err;
+  struct sockaddr_un server;
+
+  if (access(sock_path_asd_bic[slot], F_OK) == -1) {
+    // SOCK_PATH_ASD_BIC doesn't exist, means ASD daemon for this
+    // slot is not running, exit
+    return 0;
+  }
+
+  sock = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (sock < 0) {
+    err = errno;
+    syslog(LOG_ERR, "%s failed open socket (errno=%d)", __FUNCTION__, err);
+    return -1;
+  }
+
+  server.sun_family = AF_UNIX;
+  strcpy(server.sun_path, sock_path_asd_bic[slot]);
+
+  if (connect(sock, (struct sockaddr *) &server, sizeof(struct sockaddr_un)) < 0) {
+    err = errno;
+    close(sock);
+    syslog(LOG_ERR, "%s failed connecting stream socket (errno=%d), %s",
+           __FUNCTION__, err, server.sun_path);
+    return -1;
+  }
+  if (write(sock, data, 2) < 0) {
+    err = errno;
+    syslog(LOG_ERR, "%s error writing on stream sockets (errno=%d)",
+           __FUNCTION__, err);
+  }
+  close(sock);
+
+  return 0;
+}
+
+int
+pal_handle_oem_1s_asd_msg_in(uint8_t slot, uint8_t *data, uint8_t data_len)
+{
+  int sock;
+  int err;
+  struct sockaddr_un server;
+
+  if (access(sock_path_jtag_msg[slot], F_OK) == -1) {
+    // SOCK_PATH_JTAG_MSG doesn't exist, means ASD daemon for this
+    // slot is not running, exit
+    return 0;
+  }
+
+  sock = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (sock < 0) {
+    err = errno;
+    syslog(LOG_ERR, "%s failed open socket (errno=%d)", __FUNCTION__, err);
+    return -1;
+  }
+
+  server.sun_family = AF_UNIX;
+  strcpy(server.sun_path, sock_path_jtag_msg[slot]);
+
+  if (connect(sock, (struct sockaddr *)&server, sizeof(struct sockaddr_un)) < 0) {
+    err = errno;
+    close(sock);
+    syslog(LOG_ERR, "%s failed connecting stream socket (errno=%d), %s",
+           __FUNCTION__, err, server.sun_path);
+    return -1;
+  }
+
+  if (write(sock, data, data_len) < 0) {
+    err = errno;
+    syslog(LOG_ERR, "%s error writing on stream sockets (errno=%d)", __FUNCTION__, err);
+  }
+
+  close(sock);
+  return 0;
+}
+
+// It's called by fpc-util directly
+int
+pal_sb_set_amber_led(uint8_t fru, bool led_on) {
+  int ret = 0;
+  int i2cfd = -1;
+  uint8_t bus = 0;
+
+  ret = fby3_common_get_bus_id(fru);
+  if ( ret < 0 ) {
+    printf("%s() Couldn't get the bus id of fru%d\n", __func__, fru);
+    goto err_exit;
+  }
+  bus = (uint8_t)ret + 4;
+
+  i2cfd = i2c_cdev_slave_open(bus, SB_CPLD_ADDR, I2C_SLAVE_FORCE_CLAIM);
+  if ( i2cfd < 0 ) {
+    printf("%s() Couldn't open i2c bus%d, err: %s\n", __func__, bus, strerror(errno));
+    goto err_exit;
+  }
+
+  uint8_t tbuf[2] = {0xf, (led_on == true)?0x01:0x00};
+  ret = i2c_rdwr_msg_transfer(i2cfd, (SB_CPLD_ADDR << 1), tbuf, 2, NULL, 0);
+  if ( ret < 0 ) {
+    printf("%s() Couldn't write data to addr %02X, err: %s\n",  __func__, SB_CPLD_ADDR, strerror(errno));
+  }
+
+err_exit:
+  if ( i2cfd > 0 ) close(i2cfd);
+  return ret;
+}
+
+// IPMI chassis identification LED command
+// ipmitool chassis identify [force|0]
+//   force: turn on LED indefinitely
+//       0: turn off LED
+int
+pal_set_slot_led(uint8_t slot, uint8_t *req_data, uint8_t req_len, uint8_t *res_data, uint8_t *res_len) {
+  int rsp_cc = CC_UNSPECIFIED_ERROR;
+  uint8_t *data = req_data;
+  *res_len = 0;
+
+   /* There are 2 option bytes for Chassis Identify Command
+    * Byte 1 : Identify Interval in seconds. (Not support, OpenBMC only support turn off action)
+    *          00h = Turn off Identify
+    * Byte 2 : Force Identify On
+    *          BIT0 : 1b = Turn on Identify indefinitely. This overrides the values in byte 1.
+    *                 0b = Identify state driven according to byte 1.
+    */
+  if ( 5 == req_len ) {
+    if ( GETBIT(*(data+1), 0) ) {
+      //turn on
+      rsp_cc = pal_sb_set_amber_led(slot, true);
+    } else if ( 0 == *data ) {
+      //turn off
+      rsp_cc = pal_sb_set_amber_led(slot, false);
+    } else {
+      rsp_cc = CC_INVALID_PARAM;
+    }
+  } else if ( 4  == req_len ) {
+    if (0 == *data) {
+      //turn off
+      rsp_cc = pal_sb_set_amber_led(slot, false);
+    } else {
+      rsp_cc = CC_INVALID_PARAM;
+    }
+  }
+
+  if ( rsp_cc < 0 ) rsp_cc = CC_UNSPECIFIED_ERROR;
+  return rsp_cc;
+}
+
+int
+pal_get_dev_info(uint8_t slot_id, uint8_t dev_id, uint8_t *nvme_ready, uint8_t *status, uint8_t *type) {
+  return bic_get_dev_info(slot_id, dev_id, nvme_ready, status, type);
+}
+
+int
+pal_check_slot_cpu_present(uint8_t slot_id) {
+  int ret = 0;
+  bic_gpio_t gpio = {0};
+
+  ret = bic_get_gpio(slot_id, &gpio, NONE_INTF);
+  if ( ret < 0 ) {
+    printf("%s() bic_get_gpio returns %d\n", __func__, ret);
+    return ret;
+  }
+
+  if (BIT_VALUE(gpio, FM_CPU_SKTOCC_LVT3_N)) {
+    syslog(LOG_CRIT, "FRU: %d, CPU absence", slot_id);
+  } else {
+    syslog(LOG_CRIT, "FRU: %d, CPU presence", slot_id);
+  }
+
+  return ret;
+}
+
+int
+pal_get_sensor_util_timeout(uint8_t fru) {
+  switch (fru) {
+    case FRU_SLOT1:
+    case FRU_SLOT2:
+    case FRU_SLOT3:
+    case FRU_SLOT4:
+      return 10;
+    case FRU_BMC:
+    case FRU_NIC:
+    default:
+      return 4;
+  }
+}
+
+// IPMI OEM Command 
+// netfn: NETFN_OEM_1S_REQ (0x38)
+// command code: CMD_OEM_1S_GET_SYS_FW_VER (0x40)
+int
+pal_get_fw_ver(uint8_t slot, uint8_t *req_data, uint8_t *res_data, uint8_t *res_len) {
+  int ret = 0;
+  uint8_t type_2ou = 0;
+  uint8_t fru = 0;
+  uint8_t comp = 0;
+  FILE* fp = NULL;
+  char buf[MAX_FW_VER_LEN] = {0};
+  // To keep the format consistent with fw-util, get version from fw-util directly.
+  static const char* cmd_table[IPMI_GET_VER_FRU_NUM][IPMI_GET_VER_MAX_COMP] = {
+    // BMC
+    {
+      "/usr/bin/fw-util bmc --version bmc | awk '{print $NF}'",
+      "/usr/bin/fw-util bmc --version rom | awk '{print $NF}'",
+      "/usr/bin/fw-util bmc --version cpld | awk '{print $NF}'",
+      "/usr/bin/fw-util bmc --version fscd | awk '{print $NF}'",
+      "/usr/bin/fw-util bmc --version tpm | awk '{print $NF}'",
+      NULL, 
+      NULL, 
+      NULL, 
+      NULL
+    },
+    // NIC
+    {
+      "/usr/bin/fw-util nic --version | awk '{print $NF}'",
+      NULL, 
+      NULL, 
+      NULL, 
+      NULL, 
+      NULL, 
+      NULL, 
+      NULL, 
+      NULL
+    },
+    // Base board
+    {
+      "/usr/bin/fw-util slot1 --version bb_bic | awk '{print $NF}'",
+      "/usr/bin/fw-util slot1 --version bb_bicbl | awk '{print $NF}'",
+      "/usr/bin/fw-util slot1 --version bb_cpld | awk '{print $NF}'",
+      NULL,
+      NULL, 
+      NULL, 
+      NULL, 
+      NULL, 
+      NULL
+    },
+    // Server board
+    {
+      "/usr/bin/fw-util slot1 --version bic | awk '{print $NF}'",
+      "/usr/bin/fw-util slot1 --version bicbl | awk '{print $NF}'",
+      "/usr/bin/fw-util slot1 --version bios | awk '{print $NF}'",
+      "/usr/bin/fw-util slot1 --version cpld | awk '{print $NF}'",
+      "/usr/bin/fw-util slot1 --version me | awk '{print $NF}'",
+      "/usr/bin/fw-util slot1 --version vr | grep 'VCCIN_VSA' | awk '{print $5}' | cut -c -8",
+      "/usr/bin/fw-util slot1 --version vr | grep 'VCCIO' | awk '{print $5}' | cut -c -8",
+      "/usr/bin/fw-util slot1 --version vr | grep 'VDDQ_ABC' | awk '{print $5}' | cut -c -8",
+      "/usr/bin/fw-util slot1 --version vr | grep 'VDDQ_DEF' | awk '{print $5}' | cut -c -8"
+    },
+    // 2OU
+    {
+      "/usr/bin/fw-util slot1 --version 2ou_bic | awk '{print $NF}'",
+      "/usr/bin/fw-util slot1 --version 2ou_bicbl | awk '{print $NF}'",
+      NULL, 
+      NULL, 
+      NULL, 
+      NULL, 
+      NULL, 
+      NULL, 
+      NULL
+    }
+  };
+
+  *res_len = 0;
+  if (req_data == NULL) {
+    syslog(LOG_ERR, "%s(): IPMI request failed due to NULL parameter: *req_data", __func__);
+    return CC_INVALID_PARAM;
+  }
+  if (res_data == NULL) {
+    syslog(LOG_ERR, "%s(): IPMI request failed due to NULL parameter: *res_data", __func__);
+    return CC_INVALID_PARAM;
+  }
+  if (res_len == NULL) {
+    syslog(LOG_ERR, "%s(): IPMI request failed due to NULL parameter: *res_len", __func__);
+    return CC_INVALID_PARAM;
+  }
+
+  ret = fby3_common_get_2ou_board_type(slot, &type_2ou);
+  if (ret < 0) {
+    syslog(LOG_ERR, "%s(): Not support CMD_OEM_1S_GET_SYS_FW_VER IPMI command due to get 2ou board type failed", __func__);
+    return CC_UNSPECIFIED_ERROR;
+  }
+  if (type_2ou != E1S_BOARD) {
+    syslog(LOG_ERR, "%s(): CMD_OEM_1S_GET_SYS_FW_VER IPMI command only support by Sierra Point system", __func__);
+    return CC_NOT_SUPP_IN_CURR_STATE;
+  }
+
+  fru = ((GET_FW_VER_REQ*)req_data)->fru;
+  comp = ((GET_FW_VER_REQ*)req_data)->component;
+  if ((fru >= IPMI_GET_VER_FRU_NUM) || (comp >= IPMI_GET_VER_MAX_COMP) || (cmd_table[fru][comp] == NULL)) {
+    syslog(LOG_ERR, "%s(): wrong FRU or component, fru = %x, comp = %x", __func__, fru, comp);
+    return CC_PARAM_OUT_OF_RANGE;
+  }
+
+  if((fp = popen(cmd_table[fru][comp], "r")) == NULL) {
+    syslog(LOG_ERR, "%s(): fail to send command: %s, errno: %s", __func__, cmd_table[fru][comp], strerror(errno));
+    return CC_UNSPECIFIED_ERROR;
+  }
+
+  memset(buf, 0, sizeof(buf));
+  if(fgets(buf, sizeof(buf), fp) != NULL) {
+    *res_len = strlen(buf);
+    strncpy((char*)res_data, buf, MAX_FW_VER_LEN);
+  }
+
+  if (fp != NULL) {
+    pclose(fp);
+  }
+
+  return CC_SUCCESS;
+}
+
+int
+pal_gpv3_mux_select(uint8_t slot_id, uint8_t dev_id) {
+  if ( bic_mux_select(slot_id, get_gpv3_bus_number(dev_id), dev_id, REXP_BIC_INTF) < 0 ) {
+    printf("* Failed to select MUX\n");
+    return BIC_STATUS_FAILURE;
+  }
+  return BIC_STATUS_SUCCESS;
 }

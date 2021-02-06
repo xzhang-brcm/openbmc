@@ -19,16 +19,31 @@
 #
 import subprocess
 
+import libgpio
+from aiohttp.log import server_logger
 
-def read_gpio_sysfs(gpio):
+
+def read_gpio_by_name(name: str, chip: str = "aspeed-gpio") -> int:
     try:
-        with open("/sys/class/gpio/gpio%d/value" % gpio, "r") as f:
-            val_string = f.read()
-            if val_string == "1\n":
-                return 1
-            if val_string == "0\n":
-                return 0
-    except:
+        gpio = libgpio.GPIO(chip=chip, name=name)
+        val = gpio.get_value()
+        gpio.close()
+        return int(val)
+    except Exception as exc:
+        server_logger.exception("Error getting gpio value %s " % name, exc_info=exc)
+        return None
+
+
+def read_gpio_by_shadow(shadow_name: str) -> int:
+    try:
+        gpio = libgpio.GPIO(shadow=shadow_name)
+        val = gpio.get_value()
+        gpio.close()
+        return int(val)
+    except Exception as exc:
+        server_logger.exception(
+            "Error getting gpio value %s " % shadow_name, exc_info=exc
+        )
         return None
 
 

@@ -1,12 +1,38 @@
 {
-  "version": "FSC6.1",
-  "pwm_transition_value": 70,
+  "version": "FSC6.4",
+  "pwm_transition_value": 60,
   "pwm_boost_value": 100,
-  "non_fanfail_limited_boost_value": 90,
+  "non_fanfail_limited_boost_value": 100,
   "sample_interval_ms": 3000,
   "boost": {
     "fan_fail": true,
-    "sensor_fail": false
+    "sensor_fail": true
+  },
+  "fan_dead_boost": {
+    "threshold": 20,
+    "action": "host_shutdown"
+  },
+  "sensor_valid_check": {
+    "front_io_temp": {
+      "attribute": {
+        "type" : "power_status"
+      }
+    },
+    "soc_cpu": {
+      "attribute": {
+        "type" : "power_status"
+      }
+    },
+    "soc_therm": {
+      "attribute": {
+        "type" : "power_status"
+      }
+    },
+    "soc_dimm": {
+      "attribute": {
+        "type" : "power_status"
+      }
+    }
   },
   "watchdog": false,
   "min_rpm": 500,
@@ -20,18 +46,18 @@
       "negative_hysteresis": 2,
       "data": [
         [ 25, 10 ],
-        [ 26, 11 ],
-        [ 27, 12 ],
-        [ 28, 13 ],
-        [ 29, 14 ],
-        [ 30, 16 ],
-        [ 31, 17 ],
-        [ 32, 18 ],
-        [ 33, 19 ],
-        [ 34, 20 ],
-        [ 35, 22 ],
-        [ 36, 22 ],
-        [ 37, 30 ],
+        [ 26, 10 ],
+        [ 27, 11 ],
+        [ 28, 11 ],
+        [ 29, 12 ],
+        [ 30, 12 ],
+        [ 31, 13 ],
+        [ 32, 13 ],
+        [ 33, 14 ],
+        [ 34, 14 ],
+        [ 35, 15 ],
+        [ 36, 15 ],
+        [ 37, 20 ],
         [ 38, 40 ],
         [ 39, 50 ]
       ]
@@ -42,7 +68,7 @@
       },
       "type": "linear",
       "positive_hysteresis": 0,
-      "negative_hysteresis": 2,
+      "negative_hysteresis": 3,
       "data": [
         [ -16, 10 ],
         [ -15, 11 ],
@@ -97,16 +123,23 @@
       },
       "type": "linear",
       "positive_hysteresis": 0,
-      "negative_hysteresis": 2,
+      "negative_hysteresis": 3,
       "data": [
-        [75, 10],
-        [76, 11],
+        [76, 10],
         [77, 11],
-        [78, 12],
+        [78, 11],
         [79, 12],
         [80, 12],
         [81, 13],
-        [82, 13]
+        [82, 13],
+        [83, 14],
+        [84, 15],
+        [85, 15],
+        [86, 16],
+        [87, 17],
+        [88, 18],
+        [89, 19],
+        [90, 20]
       ]
     },
     "pid_nic": {
@@ -114,7 +147,7 @@
         "util" : "/usr/local/bin/sensor-util"
       },
       "type": "pid",
-      "setpoint": 85,
+      "setpoint": 95,
       "negative_hysteresis": 3,
       "positive_hysteresis": 0,
       "kp": -1.25,

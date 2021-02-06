@@ -52,7 +52,7 @@ func init() {
 	// syslog
 	syslogWriter, err := getSyslogWriter()
 	if err != nil {
-		log.Printf("Unable to get syslog: %v\n", err)
+		log.Printf("Unable to get syslog: %v", err)
 	} else {
 		streams = append(streams, syslogWriter)
 	}
@@ -67,7 +67,9 @@ func (w LogWriter) Write(p []byte) (n int, err error) {
 	for _, stream := range w.Streams {
 		n, err = stream.Write(p)
 		if err != nil {
-			panic(err)
+			// don't panic, just log to stderr that this has failed.
+			// there are cases of syslog delivery failing and causing the whole upgrade to fail.
+			println(fmt.Sprintf("%v", err))
 		}
 	}
 	return
@@ -94,5 +96,16 @@ func getSyslogWriter() (syslogWriter io.Writer, err error) {
 // However, busybox syslog returns 1 if already started, so we ignore the
 // error from RunCommand.
 var StartSyslog = func() {
-	utils.RunCommand([]string{"/etc/init.d/syslog", "start"}, 30*time.Second)
+	systemdAvail, err := utils.SystemdAvailable()
+	if err != nil {
+		log.Printf("Unable to decide if systemd is available: %v", err)
+		return
+	}
+	cmd := []string{}
+	if systemdAvail {
+		cmd = []string{"systemctl", "start", "syslog"}
+	} else {
+		cmd = []string{"/etc/init.d/syslog", "start"}
+	}
+	utils.RunCommand(cmd, 30*time.Second)
 }

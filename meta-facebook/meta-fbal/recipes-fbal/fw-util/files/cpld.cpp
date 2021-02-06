@@ -1,8 +1,10 @@
 #include <cstdio>
 #include <cstring>
+#include <syslog.h>
 #include <openbmc/obmc-i2c.h>
 #include <openbmc/pal.h>
 #include <openbmc/cpld.h>
+#include <openbmc/kv.h>
 #include "fw-util.h"
 
 using namespace std;
@@ -78,47 +80,79 @@ class CpldComponent : public Component {
     int print_version();
 };
 
-class PfrCpldComponent : public Component {
-  public:
-    PfrCpldComponent(string fru, string comp)
-      : Component(fru, comp) {}
-    int update(string image);
-    int print_version();
-};
-
 int CpldComponent::_update(const char *path, uint8_t is_signed) {
   int ret = -1;
   uint8_t i, cfm_cnt = 1, rev_id = 0xF;
   string comp;
+  uint8_t rbuf[16];
+  uint8_t rlen;
+  uint8_t pos;
+  uint8_t mode;
+  constexpr auto cpld_ident = "glb_cpld";
 
-  if ((pld_type == MAX10_10M25) && !pal_get_board_rev_id(&rev_id) && (rev_id < 2)) {
-    cfm_cnt = 2;
+  do {
+    if (_component == cpld_ident) {
+      if(pal_get_host_system_mode(&mode) || mode == MB_2S_MODE ) {
+        printf("Global CPLD update only in 4S Mode\n");
+        break;
+      }
+
+      if( lib_cmc_set_block_command_flag(4, CM_COMMAND_BLOCK) ) {  //BLOCK global CPLD Update
+        printf("Set cmc block flag fail,Global CPLD FW update is on going\n");
+        break;
+      }
+
+      if (lib_cmc_get_block_command_flag(rbuf, &rlen)) {
+        printf("Get cmc block flag fail\n");
+        break;
+      }
+
+      if ( pal_get_mb_position(&pos) )
+        break;
+
+      if ( (pos == MB_ID0 && ((rbuf[6] & UPDATE_GLOB_PLD_BLOCK) != 0)) ||
+           (pos == MB_ID1 && ((rbuf[4] & UPDATE_GLOB_PLD_BLOCK) != 0)) ) {
+        printf("Global CPLD FW update is on going.\n");
+        break;
+      }
+    }
+
+    if ((pld_type == MAX10_10M25) && !pal_get_board_rev_id(&rev_id) && (rev_id < 2)) {
+      cfm_cnt = 2;
+    }
+
+    syslog(LOG_CRIT, "Component %s%s upgrade initiated", _component.c_str(), is_signed? "": " force");
+    for (i = 0; i < cfm_cnt; i++) {
+      if (i == 1) {
+        // workaround for EVT boards that CONFIG_SEL of main CPLD is floating,
+        // so program both CFMs
+        attr.img_type = s_attrs[CFM1_10M25].img_type;
+        attr.start_addr = s_attrs[CFM1_10M25].start_addr;
+        attr.end_addr = s_attrs[CFM1_10M25].end_addr;
+      }
+ 
+      if (cpld_intf_open(pld_type, INTF_I2C, &attr)) {
+        printf("Cannot open i2c!\n");
+        break;
+      }
+ 
+      comp = _component;
+      transform(comp.begin(), comp.end(),comp.begin(), ::toupper);
+      ret = cpld_program((char *)path, (char *)comp.substr(0, 4).c_str(), is_signed);
+      cpld_intf_close(INTF_I2C);
+      if (ret) {
+        printf("Error Occur at updating CPLD FW!\n");
+        break;
+      }
+    }
+    if (ret == 0)
+      syslog(LOG_CRIT, "Component %s%s upgrade completed",
+             _component.c_str(), is_signed? "": " force");
+  }while(0);
+
+  if (_component == cpld_ident) {
+    lib_cmc_set_block_command_flag(4, CM_COMMAND_UNBLOCK);
   }
-
-  for (i = 0; i < cfm_cnt; i++) {
-    if (i == 1) {
-      // workaround for EVT boards that CONFIG_SEL of main CPLD is floating,
-      // so program both CFMs
-      attr.img_type = s_attrs[CFM1_10M25].img_type;
-      attr.start_addr = s_attrs[CFM1_10M25].start_addr;
-      attr.end_addr = s_attrs[CFM1_10M25].end_addr;
-    }
-
-    if (cpld_intf_open(pld_type, INTF_I2C, &attr)) {
-      printf("Cannot open i2c!\n");
-      return -1;
-    }
-
-    comp = _component;
-    transform(comp.begin(), comp.end(),comp.begin(), ::toupper);
-    ret = cpld_program((char *)path, (char *)comp.substr(0, 4).c_str(), is_signed);
-    cpld_intf_close(INTF_I2C);
-    if (ret) {
-      printf("Error Occur at updating CPLD FW!\n");
-      break;
-    }
-  }
-
   return ret;
 }
 
@@ -133,82 +167,27 @@ int CpldComponent::fupdate(string image) {
 int CpldComponent::print_version() {
   int ret = -1;
   uint8_t ver[4];
-  char strbuf[16];
+  char strbuf[MAX_VALUE_LEN];
   string comp;
 
-  if (!cpld_intf_open(pld_type, INTF_I2C, &attr)) {
-    ret = cpld_get_ver((uint32_t *)ver);
-    cpld_intf_close(INTF_I2C);
-  }
-
-  if (ret) {
-    sprintf(strbuf, "NA");
-  } else {
-    sprintf(strbuf, "%02X%02X%02X%02X", ver[3], ver[2], ver[1], ver[0]);
-  }
-
-  comp = _component;
-  transform(comp.begin(), comp.end(),comp.begin(), ::toupper);
-  sys.output << comp << " Version: " << string(strbuf) << endl;
-
-  return 0;
-}
-
-int PfrCpldComponent::update(string image) {
-  int ret;
-  string dev, cmd;
-
-  if (pal_is_pfr_active() != PFR_ACTIVE) {
-    return FW_STATUS_NOT_SUPPORTED;
-  }
-
-  if (!sys.get_mtd_name(string("stg-cpld"), dev)) {
-    return FW_STATUS_FAILURE;
-  }
-
-  sys.output << "Flashing to device: " << dev << endl;
-  cmd = "flashcp -v " + image + " " + dev;
-  ret = sys.runcmd(cmd);
-  ret = pal_fw_update_finished(0, _component.c_str(), ret);
-
-  return ret;
-}
-
-int PfrCpldComponent::print_version() {
-  int ret = -1;
-  int ifd = 0;
-  uint8_t i, tbuf[8], rbuf[8], cmds[4] = {0x7f, 0x01, 0x7e, 0x7d};
-  uint8_t ver[4];
-  char strbuf[16];
-  string comp;
-
-  if (_component == "pfr_cpld_rc") {
-    return 0;
-  }
-
-  do {
-    sprintf(strbuf, "/dev/i2c-%d", PFR_MAILBOX_BUS);
-    ifd = open(strbuf, O_RDWR);
-    if (ifd < 0) {
-      break;
-    }
-
-    for (i = 0; i < sizeof(cmds); i++) {
-      tbuf[0] = cmds[i];
-      if ((ret = i2c_rdwr_msg_transfer(ifd, PFR_MAILBOX_ADDR, tbuf, 1, rbuf, 1))) {
-        break;
+  if (kv_get(_component.c_str(), strbuf, NULL, 0)) {
+    if (_component == "glb_cpld") {
+      if (!pal_get_config_is_master()) {
+        ret = cmd_smbc_get_glbcpld_ver(BMC0_SLAVE_DEF_ADDR, ver);
       }
-      ver[i] = rbuf[0];
     }
-  } while (0);
-  if (ifd > 0) {
-    close(ifd);
-  }
 
-  if (ret) {
-    sprintf(strbuf, "NA");
-  } else {
-    sprintf(strbuf, "%02X%02X%02X%02X", ver[3], ver[2], ver[1], ver[0]);
+    if (ret && !cpld_intf_open(pld_type, INTF_I2C, &attr)) {
+      ret = cpld_get_ver((uint32_t *)ver);
+      cpld_intf_close(INTF_I2C);
+    }
+
+    if (ret) {
+      sprintf(strbuf, "NA");
+    } else {
+      sprintf(strbuf, "%02X%02X%02X%02X", ver[3], ver[2], ver[1], ver[0]);
+      kv_set(_component.c_str(), strbuf, 0, 0);
+    }
   }
 
   comp = _component;
@@ -218,19 +197,6 @@ int PfrCpldComponent::print_version() {
   return 0;
 }
 
-class CpldConfig {
-  public:
-  CpldConfig() {
-    if (!pal_is_pfr_active()) {
-      static CpldComponent pfr_cpld("cpld", "pfr_cpld", MAX10_10M25, CFM0_10M25, 4, 0x5a);
-    } else {
-      static PfrCpldComponent pfr_cpld("cpld", "pfr_cpld");
-      static PfrCpldComponent pfr_cpld_rc("cpld", "pfr_cpld_rc");
-    }
-
-    static CpldComponent mod_cpld("cpld", "mod_cpld", MAX10_10M16, CFM0_10M16, 4, 0x55);
-    static CpldComponent glb_cpld("cpld", "glb_cpld", MAX10_10M16, CFM0_10M16, 23, 0x55);
-  }
-};
-
-CpldConfig cpld_conf;
+CpldComponent pfr_cpld("cpld", "pfr_cpld", MAX10_10M25, CFM0_10M25, 4, 0x5a);
+CpldComponent mod_cpld("cpld", "mod_cpld", MAX10_10M16, CFM0_10M16, 4, 0x55);
+CpldComponent glb_cpld("cpld", "glb_cpld", MAX10_10M16, CFM0_10M16, 23, 0x55);

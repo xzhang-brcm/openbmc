@@ -32,7 +32,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/time.h>
-#include <openbmc/kv.h>
 #include "bic_fwupdate.h"
 #include "bic_bios_fwupdate.h"
 
@@ -82,25 +81,6 @@ bic_send:
   }
 
   return ret;
-}
-
-static int
-_set_fw_update_ongoing(uint8_t slot_id, uint16_t tmout) {
-  char key[64];
-  char value[64] = {0};
-  struct timespec ts;
-
-  sprintf(key, "fru%u_fwupd", slot_id);
-
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  ts.tv_sec += tmout;
-  sprintf(value, "%ld", ts.tv_sec);
-
-  if (kv_set(key, value, 0, 0) < 0) {
-     return -1;
-  }
-
-  return 0;
 }
 
 static int
@@ -203,6 +183,42 @@ bic_send:
   return ret;
 }
 
+struct bic_get_fw_cksum_sha256_req {
+  uint8_t iana_id[3];
+  uint8_t target;
+  uint32_t offset;
+  uint32_t length;
+} __attribute__((packed));
+
+struct bic_get_fw_cksum_sha256_res {
+  uint8_t iana_id[3];
+  uint8_t cksum[32];
+} __attribute__((packed));
+
+int
+bic_get_fw_cksum_sha256(uint8_t slot_id, uint8_t target, uint32_t offset, uint32_t len, uint8_t *cksum) {
+  int ret;
+  struct bic_get_fw_cksum_sha256_req req = {
+    .iana_id = {0x9c, 0x9c, 0x00},
+    .target = target,
+    .offset = offset,
+    .length = len,
+  };
+  struct bic_get_fw_cksum_sha256_res res = {0};
+  uint8_t rlen = sizeof(res);
+
+  ret = bic_ipmb_wrapper(slot_id, NETFN_OEM_1S_REQ, BIC_CMD_OEM_FW_CKSUM_SHA256, (uint8_t *) &req, sizeof(req), (uint8_t *) &res, &rlen);
+  if (ret != 0) {
+    return -1;
+  }
+  if (rlen != sizeof(res)) {
+    return -2;
+  }
+
+  memcpy(cksum, res.cksum, sizeof(res.cksum));
+
+  return 0;
+}
 
 static int
 verify_bios_image(uint8_t slot_id, int fd, long size) {
@@ -363,6 +379,7 @@ update_bic_bios(uint8_t slot_id, uint8_t comp, char *image, uint8_t force) {
       last_offset += dsize;
     }
   }
+  printf("\n");
 
   if (comp != FW_BIOS_CAPSULE && comp != FW_CPLD_CAPSULE && comp != FW_BIOS_RCVY_CAPSULE && comp != FW_CPLD_RCVY_CAPSULE) {
     _set_fw_update_ongoing(slot_id, 60 * 2);

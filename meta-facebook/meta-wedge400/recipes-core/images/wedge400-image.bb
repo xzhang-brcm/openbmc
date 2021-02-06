@@ -13,7 +13,8 @@ IMAGE_INSTALL += " \
   at93cx6-util \
   ast-mdio \
   bcm5396-util \
-  bic-cached \
+  bic-cache \
+  bic-monitor \
   bic-util \
   bitbang \
   cpldupdate \
@@ -24,16 +25,16 @@ IMAGE_INSTALL += " \
   flashrom \
   front-paneld \
   fw-util \
+  i2craw \
   gbi2ctool \
   gpiocli \
-  gpiod \
   ipmbd \
   ipmid \
   ipmitool \
   libcpldupdate-dll-ast-jtag \
   libfruid \
   lldp-util \
-  log-util \
+  log-util-v2 \
   mdio-util \
   me-util \
   mterm \
@@ -50,6 +51,7 @@ IMAGE_INSTALL += " \
   wedge-eeprom \
   weutil-dhcp-id \
   rackmon \
+  mtd-utils-ubifs \
   "
 
 def tpm_tools_recipe(d):
