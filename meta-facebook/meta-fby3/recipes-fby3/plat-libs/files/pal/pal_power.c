@@ -11,6 +11,8 @@
 #include <openbmc/kv.h>
 #include <openbmc/libgpio.h>
 #include <openbmc/obmc-i2c.h>
+#include <openbmc/ncsi.h>
+#include <openbmc/nl-wrapper.h>
 #include "pal.h"
 
 #define CPLD_PWR_CTRL_BUS 12
@@ -24,6 +26,106 @@ enum {
 };
 
 static uint8_t m_slot_pwr_ctrl[MAX_NODES+1] = {0};
+
+#define NIC_FW_VER_PATH             "/tmp/cache_store/nic_fw_ver"
+#define NIC_FW_VER_MIN_SIZE         36
+#define MFG_BROADCOM                0x3D110000
+
+#define MAX_POWER_PREP_RETRY_CNT    3
+#define NCSI_RETRY_MAX              2
+#define BRCM_POWERUP_PRE_CMD        0x1A
+
+#define REINIT_TYPE_FULL            0
+#define REINIT_TYPE_HOST_RESOURCE   1
+
+static int
+nic_powerup_prep(uint8_t slot_id, uint8_t reinit_type) {
+  uint8_t bmc_location = 0;
+  uint8_t ret = 0, retry = 0, cc = 0;
+  uint8_t nic_fw_ver[NIC_FW_VER_MIN_SIZE];
+  uint8_t channel = 0;
+  uint8_t oem_payload_length = 4;
+  uint32_t nic_mfg_id = 0;
+  FILE *fp = NULL;
+  NCSI_NL_MSG_T *msg = NULL;
+  NCSI_NL_RSP_T *rsp = NULL;
+
+  ret = fby3_common_get_bmc_location(&bmc_location);
+  if ( ret < 0 ) {
+    syslog(LOG_WARNING, "%s() Cannot get the location of BMC", __func__);
+    return -1;
+  }
+  if ( bmc_location != BB_BMC && bmc_location != DVT_BB_BMC ) {
+    return 0;
+  }
+
+  ret = fby3_common_check_slot_id(slot_id);
+  if ( ret < 0 ) {
+    return 0;
+  }
+
+  fp = fopen(NIC_FW_VER_PATH, "rb");
+  if (!fp) {
+    syslog(LOG_WARNING, "%s() Fail to open vendor ID.", __func__);
+    return -1;
+  }
+  if (fread(nic_fw_ver, sizeof(uint8_t), sizeof(nic_fw_ver), fp) < NIC_FW_VER_MIN_SIZE) {
+    syslog(LOG_WARNING, "%s() Fail to read vendor ID.", __func__);
+    fclose(fp);
+    return -1;
+  }
+  fclose(fp);
+
+  // get the manufcture id
+  nic_mfg_id = (nic_fw_ver[35]<<24) | (nic_fw_ver[34]<<16) | (nic_fw_ver[33]<<8) | nic_fw_ver[32];
+
+  if (nic_mfg_id == MFG_BROADCOM) {
+    msg = calloc(1, sizeof(NCSI_NL_MSG_T));
+    memset(msg, 0, sizeof(NCSI_NL_MSG_T));
+    sprintf(msg->dev_name, "eth0");
+    msg->channel_id = channel;
+    msg->cmd = NCSI_OEM_CMD;
+    msg->payload_length = 16;
+
+    msg->msg_payload[0] = 0x00;  // 0~3: IANA
+    msg->msg_payload[1] = 0x00;
+    msg->msg_payload[2] = 0x11;
+    msg->msg_payload[3] = 0x3D;
+    msg->msg_payload[4] = 0x00; // OEM Playload Version
+    msg->msg_payload[5] = BRCM_POWERUP_PRE_CMD ; // OEM Command Type
+    msg->msg_payload[6] = 0x00; // 6~7: OEM Payload Length
+    msg->msg_payload[7] = oem_payload_length;
+    msg->msg_payload[8] = 0x00; // 8~12: Reserved
+    msg->msg_payload[9] = 0x00;
+    msg->msg_payload[10] = 0x00;
+    msg->msg_payload[11] = 0x00;
+    msg->msg_payload[12] = 0x00;
+    msg->msg_payload[13] = reinit_type; // ReInit Type
+    msg->msg_payload[14] = 0x00; //14~15: Host ID
+    msg->msg_payload[15] = slot_id;
+
+    do {
+      rsp = send_nl_msg_libnl(msg);
+      cc = (rsp->msg_payload[0]<<8) + rsp->msg_payload[1];
+      if (cc == RESP_COMMAND_COMPLETED ) {
+        break;
+      }
+      retry++;
+    } while (retry < NCSI_RETRY_MAX);
+
+    if (cc != RESP_COMMAND_COMPLETED) {
+      printf("Power-up prepare command failed for slot%d!\n", slot_id);
+      ret = -1;
+      print_ncsi_completion_codes(rsp);
+    } else {
+      syslog(LOG_INFO, "Power-up prepare for slot%d is done", slot_id);
+    }
+    free(rsp);
+    free(msg);
+  }
+
+  return ret;
+}
 
 bool
 is_server_off(void) {
@@ -44,6 +146,7 @@ server_power_off(uint8_t fru) {
   if ( bmc_location == NIC_BMC ) {
     if ( pal_set_nic_perst(fru, NIC_PE_RST_LOW) < 0 ) return POWER_STATUS_ERR;
   }
+  nic_powerup_prep(fru, REINIT_TYPE_FULL);
   return bic_server_power_off(fru);
 }
 
@@ -179,6 +282,10 @@ server_power_12v_off(uint8_t fru) {
   uint8_t tbuf[2] = {0};
   uint8_t tlen = 0;
   int ret = 0, retry= 0;
+
+  if (nic_powerup_prep(fru, REINIT_TYPE_FULL) != 0) {
+    syslog(LOG_WARNING, "%s() Failed to prepare nic power up for fru%d\n", __func__, fru);
+  }
 
   snprintf(cmd, 64, "rm -f /tmp/cache_store/slot%d_vr*", fru);
   if (system(cmd) != 0) {
@@ -401,6 +508,7 @@ pal_set_server_power(uint8_t fru, uint8_t cmd) {
 
     case SERVER_POWER_CYCLE:
       if (status == SERVER_POWER_ON) {
+        nic_powerup_prep(fru, REINIT_TYPE_FULL);
         return bic_server_power_cycle(fru);
       } else if (status == SERVER_POWER_OFF) {
         if ( bmc_location != NIC_BMC) {
@@ -415,7 +523,12 @@ pal_set_server_power(uint8_t fru, uint8_t cmd) {
       break;
 
     case SERVER_POWER_RESET:
-      return (status == SERVER_POWER_OFF)?POWER_STATUS_ERR:bic_server_power_reset(fru);
+      if (status == SERVER_POWER_OFF) {
+        return POWER_STATUS_ERR;
+      } else {
+        nic_powerup_prep(fru, REINIT_TYPE_HOST_RESOURCE);
+        return bic_server_power_reset(fru);
+      }
       break;
 
     case SERVER_12V_ON:
@@ -431,7 +544,11 @@ pal_set_server_power(uint8_t fru, uint8_t cmd) {
       }
 
       if ( status == SERVER_12V_OFF ) return POWER_STATUS_ALREADY_OK;
-      return server_power_12v_off(fru);
+      if (server_power_12v_off(fru) < 0) {
+        return POWER_STATUS_ERR;
+      } else {
+        return POWER_STATUS_OK;
+      }
 #if 0
       if ( server_power_12v_off(fru) == PAL_EOK ) {
         ret = pal_server_set_nic_power(SERVER_12V_OFF);
